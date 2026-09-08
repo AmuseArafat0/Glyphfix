@@ -223,6 +223,7 @@
     <details>
       <summary>Look-alike sets and length repairs</summary>
       <div>
+        <p class="hint" style="margin-top:0">Only characters that draw the same shape are swapped. Retyping a letter in the other case is not a look-alike, so the last two sets stay off unless you switch them on.</p>
         <div class="rules" id="rules"></div>
         <label class="check" style="margin-top:14px"><input type="checkbox" id="multiChk">
           <span>Two-letter swaps found in the text: rn ↔ m, vv ↔ w, cl ↔ d, ii ↔ n</span></label>
@@ -277,6 +278,9 @@
    three cheap swaps land at 30, which is a few hundred candidates,
    not the twelve thousand you get from counting swaps alone.        */
 var SETS=[
+ /* pairs that draw the same shape. capital i, small L, the digit one
+    and a bar are one character on screen, and so are zero and capital
+    o. these are the ones worth swapping.                            */
  {id:"l1I", show:"l I 1 i | !", cost:10, chars:["l","I","1","i","|","!"]},
  {id:"0Oo", show:"0 O o",       cost:10, chars:["0","O","o"]},
  {id:"5S",  show:"5 S s",       cost:12, chars:["5","S","s"]},
@@ -287,28 +291,30 @@ var SETS=[
  {id:"7T",  show:"7 T",         cost:14, chars:["7","T"]},
  {id:"4A",  show:"4 A",         cost:14, chars:["4","A"]},
  {id:"OQD", show:"O Q D 0",     cost:15, chars:["O","Q","D","0"]},
- {id:"case",show:"same shape, other case", cost:14, chars:[],
+ {id:"UV",  show:"U V u v",     cost:16, chars:["U","V","u","v"]},
+ {id:"CG",  show:"C G",         cost:16, chars:["C","G"]},
+ {id:"EF",  show:"E F",         cost:16, chars:["E","F"]},
+ {id:"nh",  show:"n h",         cost:16, chars:["n","h"]},
+ {id:"ce",  show:"c e",         cost:16, chars:["c","e"]},
+ {id:"tf",  show:"t f",         cost:16, chars:["t","f"]},
+ {id:"YV",  show:"Y V y v",     cost:16, chars:["Y","V","y","v"]},
+ {id:"KX",  show:"K X x k",     cost:16, chars:["K","X","x","k"]},
+ {id:"MN",  show:"M N W",       cost:16, chars:["M","N","W"]},
+ {id:"3B",  show:"3 B E",       cost:16, chars:["3","B","E"]},
+ {id:"dash",show:"- _ ~ .",     cost:16, chars:["-","_","~","."]},
+ /* the two below do not compare shapes, they just retype a letter in
+    the other case. off unless you ask for them.                     */
+ {id:"caseShape",show:"same letter, other case: c o s u v w x z k y", cost:20, chars:[],
   pairs:[["c","C"],["o","O"],["p","P"],["s","S"],["u","U"],["v","V"],["w","W"],["x","X"],["z","Z"],["k","K"],["y","Y"],["j","J"],["f","F"]]},
- {id:"caseAll",show:"any letter, other case", cost:20, chars:[],
-  pairs:[["a","A"],["b","B"],["d","D"],["e","E"],["g","G"],["h","H"],["i","I"],["l","L"],["m","M"],["n","N"],["q","Q"],["r","R"],["t","T"]]},
- {id:"3B",  show:"3 B E",       cost:18, chars:["3","B","E"]},
- {id:"UV",  show:"U V u v",     cost:18, chars:["U","V","u","v"]},
- {id:"CG",  show:"C G",         cost:18, chars:["C","G"]},
- {id:"EF",  show:"E F",         cost:18, chars:["E","F"]},
- {id:"nh",  show:"n h",         cost:18, chars:["n","h"]},
- {id:"ce",  show:"c e",         cost:18, chars:["c","e"]},
- {id:"tf",  show:"t f",         cost:18, chars:["t","f"]},
- {id:"YV",  show:"Y V y v",     cost:18, chars:["Y","V","y","v"]},
- {id:"KX",  show:"K X x k",     cost:18, chars:["K","X","x","k"]},
- {id:"MN",  show:"M N W",       cost:18, chars:["M","N","W"]},
- {id:"dash",show:"- _ ~ .",     cost:18, chars:["-","_","~","."]}
+ {id:"caseAny",show:"same letter, other case: every letter", cost:24, chars:[],
+  pairs:[["a","A"],["b","B"],["d","D"],["e","E"],["g","G"],["h","H"],["i","I"],["l","L"],["m","M"],["n","N"],["q","Q"],["r","R"],["t","T"]]}
 ];
 var MULTI=[["rn","m"],["m","rn"],["vv","w"],["w","vv"],["cl","d"],["d","cl"],["ii","n"],["n","ii"],["nn","m"],["ri","n"]];
 var PRESETS={
  tight: {name:"l I 1 and 0 O only", sets:["l1I","0Oo"]},
- normal:{name:"Usual suspects",     sets:["l1I","0Oo","5S","2Z","8B","6Gb","9gq","case","caseAll"]},
- wide:  {name:"Add letter shapes",  sets:["l1I","0Oo","5S","2Z","8B","6Gb","9gq","case","caseAll","7T","4A","OQD","3B","UV","CG","EF"]},
- all:   {name:"Everything",         sets:SETS.map(function(s){return s.id})},
+ normal:{name:"Look-alikes",        sets:["l1I","0Oo","5S","2Z","8B","6Gb","9gq","7T","4A","OQD"]},
+ wide:  {name:"Add loose shapes",   sets:["l1I","0Oo","5S","2Z","8B","6Gb","9gq","7T","4A","OQD","UV","CG","EF","nh","ce","tf","YV","KX","MN","3B","dash"]},
+ all:   {name:"Also retype case",   sets:SETS.map(function(s){return s.id})},
  none:  {name:"Nothing",            sets:[]}
 };
 var ALPHABET="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
@@ -850,6 +856,7 @@ function drawVerdict(){
   var order=["tight","normal","wide","all"],at=order.indexOf(S.preset);
   S.preset=order[Math.min(order.length-1,at+1)];
   S.sets=new Set(PRESETS[S.preset].sets); S.custom={}; S.off=new Set();
+  if(S.preset==="all") log("This round also retypes letters in the other case, which is a guess rather than a look-alike.","y");
   S.cap=Math.min(25000,S.cap*3);
   log("Widened to: "+PRESETS[S.preset].name+", limit now "+S.cap,"y");
   drawAll(); run();
