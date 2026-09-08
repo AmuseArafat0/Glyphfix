@@ -223,7 +223,7 @@
     <details>
       <summary>Look-alike sets and length repairs</summary>
       <div>
-        <p class="hint" style="margin-top:0">Only characters that draw the same shape are swapped. Retyping a letter in the other case is not a look-alike, so the last two sets stay off unless you switch them on.</p>
+        <p class="hint" style="margin-top:0">The first two sets are characters a screen draws with the same pixels, so the reader never had a choice to get right. Every combination of those is built and tested first, free of any budget. Sets below them look different enough that a swap is a guess, and get rationed. The last two only retype a letter in the other case, which is not a look-alike at all, so they stay off unless you switch them on.</p>
         <div class="rules" id="rules"></div>
         <label class="check" style="margin-top:14px"><input type="checkbox" id="multiChk">
           <span>Two-letter swaps found in the text: rn ↔ m, vv ↔ w, cl ↔ d, ii ↔ n</span></label>
@@ -278,9 +278,16 @@
    three cheap swaps land at 30, which is a few hundred candidates,
    not the twelve thousand you get from counting swaps alone.        */
 var SETS=[
- /* pairs that draw the same shape. capital i, small L, the digit one
-    and a bar are one character on screen, and so are zero and capital
-    o. these are the ones worth swapping.                            */
+ /* A screen draws capital i, small L and the digit one with the same
+    pixels. So does zero and capital O. Whichever one the reader picked
+    at such a position, it learned nothing, and neither did we. These
+    are not swaps to be rationed against a budget, they are blanks, and
+    every filling of every blank gets built before anything else is
+    tried. Cost zero says exactly that.                              */
+ {id:"same1",show:"I l 1  identical",  cost:0,  chars:["I","l","1"]},
+ {id:"same0",show:"0 O  identical",    cost:0,  chars:["0","O"]},
+ /* below here the characters really do look different, so a swap is a
+    guess and gets charged for */
  {id:"l1I", show:"l I 1 i | !", cost:10, chars:["l","I","1","i","|","!"]},
  {id:"0Oo", show:"0 O o",       cost:10, chars:["0","O","o"]},
  {id:"5S",  show:"5 S s",       cost:12, chars:["5","S","s"]},
@@ -311,15 +318,16 @@ var SETS=[
 ];
 var MULTI=[["rn","m"],["m","rn"],["vv","w"],["w","vv"],["cl","d"],["d","cl"],["ii","n"],["n","ii"],["nn","m"],["ri","n"]];
 var PRESETS={
- tight: {name:"l I 1 and 0 O only", sets:["l1I","0Oo"]},
- normal:{name:"Look-alikes",        sets:["l1I","0Oo","5S","2Z","8B","6Gb","9gq","7T","4A","OQD"]},
- wide:  {name:"Add loose shapes",   sets:["l1I","0Oo","5S","2Z","8B","6Gb","9gq","7T","4A","OQD","UV","CG","EF","nh","ce","tf","YV","KX","MN","3B","dash"]},
- all:   {name:"Also retype case",   sets:SETS.map(function(s){return s.id})},
- none:  {name:"Nothing",            sets:[]}
+ tight: {name:"Identical only",   sets:["same1","same0"]},
+ normal:{name:"Look-alikes",      sets:["same1","same0","l1I","0Oo","5S","2Z","8B","6Gb","9gq","7T","4A","OQD"]},
+ wide:  {name:"Add loose shapes", sets:["same1","same0","l1I","0Oo","5S","2Z","8B","6Gb","9gq","7T","4A","OQD","UV","CG","EF","nh","ce","tf","YV","KX","MN","3B","dash"]},
+ all:   {name:"Also retype case", sets:SETS.map(function(s){return s.id})},
+ none:  {name:"Nothing",          sets:[]}
 };
 var ALPHABET="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
 var LEGAL=/^[A-Za-z0-9_\-]$/;
-var OCR_COST=6;                       /* a spelling another pass actually saw */
+var OCR_COST=6;
+var FREE=0;                       /* a spelling another pass actually saw */
 var BUDGETS=[0,6,10,12,14,16,18,20,22,24,26,28,30,33,36,40,45,50];
 
 /* ===================== state ===================== */
@@ -462,8 +470,9 @@ function twinsFrom(ch,onlyActive){
   function add(c){
    if(c===ch) return;
    if(out.indexOf(c)<0) out.push(c);
-   if(cost[c]===undefined||set.cost<cost[c]) cost[c]=set.cost;
+   if(cost[c]===undefined||sc<cost[c]) cost[c]=sc;
   }
+  var sc=(set.cost===0? FREE : set.cost);
   if(set.chars.indexOf(ch)>-1) set.chars.forEach(add);
   if(set.pairs) set.pairs.forEach(function(p){
    if(p[0]===ch) add(p[1]);
@@ -542,7 +551,7 @@ function enumerate(base,slots,budget,cap,seen,out){
    if(last.slot.i+last.slot.len>sl.i){ return }
   }
   for(var j=0;j<sl.opts.length && out.length<cap;j++){
-   var alt=sl.opts[j],c2=sl.cost[alt]||18;
+   var alt=sl.opts[j],c2=(sl.cost[alt]===undefined? 18 : sl.cost[alt]);
    if(spent+c2>budget) continue;
    chosen.push({slot:sl,alt:alt});
    rec(si+1,spent+c2);
@@ -551,6 +560,17 @@ function enumerate(base,slots,budget,cap,seen,out){
  })(0,0);
  return out;
 }
+/* How many positions the reader could not have read, and how many
+   ways there are to fill them. */
+function blanks(base){
+ var pos=0,n=1,i,j;
+ for(i=0;i<base.length;i++){
+  var o=optsAt(base,i),c=o.costOf||{},k=0;
+  for(j=0;j<o.length;j++) if(c[o[j]]===0) k++;
+  if(k){ pos++; n*=(k+1); if(n>1e9) return {pos:pos,combos:Infinity} }
+ }
+ return {pos:pos,combos:n};
+}
 function nearestWant(){
  if(!S.want.length) return null;
  return S.want.reduce(function(a,b){ return Math.abs(b-S.id.length)<Math.abs(a-S.id.length)? b : a });
@@ -558,6 +578,19 @@ function nearestWant(){
 function buildAll(){
  var seen={},out=[],cap=S.cap,target=nearestWant(),L=S.id.length;
  var i,j,k2,b,c2,bases=[];
+
+ FREE=0;
+ var bl=blanks(S.id);
+ if(bl.pos){
+  log(bl.pos+" position"+(bl.pos===1?"":"s")+" the reader could not have got right either way, "+
+      (bl.combos===Infinity? "far too many" : bl.combos.toLocaleString())+" ways to fill them.","d");
+  if(bl.combos===Infinity||bl.combos>cap){
+   FREE=5;
+   log("Too many to fill exhaustively, so the closest fillings go first instead.","y");
+  } else {
+   log("All of them get built and tested before any real guess is made.","d");
+  }
+ }
 
  if(target!==null && L===target+1 && S.del){
   log("One character too long, so every single deletion goes first.","y");
