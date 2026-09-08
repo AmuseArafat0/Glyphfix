@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glyphfix — drop a screenshot, get the link that opens</title>
+<meta name="description" content="Drop a screenshot of a link. Glyphfix reads it, swaps every character that has a look-alike twin, tests each version against the live web, and hands back the one that opens.">
+<style>
+  :root{
+    --paper:#E4E7E2; --card:#FBFBF9; --card-2:#F1F2EE;
+    --ink:#14171A; --ink-2:#4C545B; --mute:#7C848B;
+    --rule:#CBD0C8; --rule-2:#DFE3DC;
+    --signal:#1F4FD8; --signal-soft:#E4EAFF;
+    --live:#2E6F3E; --live-soft:#DDEFE2; --live-rule:#9CC7A9;
+    --warn:#9A5B00; --warn-soft:#FBEEDA;
+    --dark:#191C1F;
+    --mono:"SF Mono","JetBrains Mono","Cascadia Mono",ui-monospace,Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --serif:"Charter","Bitstream Charter","Iowan Old Style",Georgia,ui-serif,serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 20px 96px}
+
+  .mast{padding:42px 0 24px;border-bottom:1px solid var(--rule)}
+  .mast h1{font-family:var(--serif);font-weight:600;font-size:clamp(28px,5vw,44px);letter-spacing:-.015em;line-height:1.06;margin:0 0 10px}
+  .mast p{margin:0;max-width:60ch;color:var(--ink-2);font-size:16px}
+
+  section{margin-top:30px}
+  .head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:11px}
+  .head h2{font-family:var(--serif);font-weight:600;font-size:20px;margin:0;letter-spacing:-.01em}
+  .head .note{font-size:13px;color:var(--mute)}
+  .panel{background:var(--card);border:1px solid var(--rule);border-radius:3px;padding:18px}
+
+  label.field{display:block;margin-bottom:13px}
+  label.field:last-child{margin-bottom:0}
+  label.field > span{display:block;font-size:13px;color:var(--ink-2);margin-bottom:5px}
+  input[type=text],input[type=password],textarea,select{width:100%;padding:9px 11px;border:1px solid var(--rule);border-radius:2px;background:#fff;color:var(--ink);font-family:var(--mono);font-size:14px}
+  textarea{line-height:1.5;resize:vertical}
+  select{font-family:var(--sans);width:auto}
+  input:focus,textarea:focus,select:focus{outline:2px solid var(--signal);outline-offset:-1px;border-color:var(--signal)}
+  .check{display:flex;align-items:flex-start;gap:9px;margin-bottom:9px;font-size:14px;color:var(--ink-2)}
+  .check input{width:auto;margin-top:3px}
+
+  button{font:inherit;cursor:pointer}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;border:1px solid var(--ink);border-radius:2px;background:var(--ink);color:#fff;font-size:14px;font-weight:500;text-decoration:none}
+  .btn:hover{background:#000}
+  .btn.ghost{background:transparent;color:var(--ink);border-color:var(--rule)}
+  .btn.ghost:hover{background:var(--card-2);border-color:var(--ink-2)}
+  .btn.go{background:var(--signal);border-color:var(--signal)}
+  .btn.go:hover{background:#173FB4}
+  .btn.big{padding:13px 24px;font-size:16px}
+  .btn.live{background:var(--live);border-color:var(--live)}
+  .btn.live:hover{background:#255A32}
+  .btn.small{padding:5px 10px;font-size:13px}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn:focus-visible,a:focus-visible,button:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+  .row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+
+  .drop{border:2px dashed var(--rule);border-radius:4px;padding:34px 22px;text-align:center;background:var(--card);transition:border-color .15s,background .15s}
+  .drop.over{border-color:var(--signal);background:var(--signal-soft)}
+  .drop h3{font-family:var(--serif);font-weight:600;font-size:19px;margin:0 0 6px}
+  .drop p{margin:0 0 14px;color:var(--mute);font-size:14px}
+  .or{text-align:center;color:var(--mute);font-size:13px;margin:14px 0 10px}
+
+  .console{background:var(--dark);color:#D8DCDF;border-radius:3px;padding:14px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.75;max-height:210px;overflow:auto;margin-top:14px}
+  .console div{white-space:pre-wrap;word-break:break-all}
+  .console .g{color:#7FD69A}
+  .console .r{color:#E88C77}
+  .console .y{color:#F2C14E}
+  .console .d{color:#8A9299}
+
+  .bar{height:5px;background:var(--rule-2);border-radius:3px;overflow:hidden;margin-top:12px}
+  .bar i{display:block;height:100%;background:var(--signal);width:0;transition:width .2s}
+
+  .verdict{border:1px solid var(--live-rule);background:var(--live-soft);border-radius:3px;padding:20px;margin-top:16px}
+  .verdict h3{font-family:var(--serif);font-size:22px;margin:0 0 4px;color:var(--live)}
+  .verdict .name{font-size:15px;color:var(--ink-2);margin-bottom:12px}
+  .verdict .link{font-family:var(--mono);font-size:14px;word-break:break-all;background:#fff;border:1px solid var(--live-rule);border-radius:2px;padding:11px 13px;margin-bottom:14px}
+  .verdict .link mark{background:var(--warn-soft);color:var(--warn);font-weight:600;padding:0 1px;border-radius:2px}
+  .verdict.none{border-color:var(--rule);background:var(--card)}
+  .verdict.none h3{color:var(--ink)}
+
+  .strip{display:flex;flex-wrap:wrap;border:1px solid var(--rule);border-radius:3px;overflow:hidden;background:var(--card);margin-top:14px}
+  .strip div{flex:1 1 120px;padding:11px 14px;border-right:1px solid var(--rule-2)}
+  .strip div:last-child{border-right:0}
+  .strip b{display:block;font-family:var(--mono);font-size:19px;font-weight:600;letter-spacing:-.02em}
+  .strip small{color:var(--mute);font-size:12px}
+  .strip .bad b{color:var(--warn)}
+
+  .gridwrap{overflow-x:auto;padding:2px 0}
+  .grid{display:flex;flex-wrap:wrap;gap:4px}
+  .cell{position:relative;width:38px;height:52px;padding:0;background:var(--card-2);border:1px solid var(--rule-2);border-radius:2px;font-family:var(--mono);font-size:19px;color:var(--ink);display:flex;align-items:center;justify-content:center}
+  .cell .tick{position:absolute;bottom:2px;left:0;right:0;font-family:var(--mono);font-size:9px;color:var(--mute)}
+  .cell.on{background:var(--signal-soft);border-color:var(--signal);color:var(--signal);font-weight:600}
+  .cell.on::after{content:attr(data-n);position:absolute;top:1px;right:3px;font-size:9px;font-family:var(--mono);color:var(--signal)}
+  .cell.off{opacity:.45}
+  .cell.sel{box-shadow:0 0 0 2px var(--ink);border-color:var(--ink)}
+  .cell:hover{border-color:var(--ink-2)}
+  .editor{margin-top:14px;border-top:1px solid var(--rule-2);padding-top:14px}
+  .editor .who{font-family:var(--mono);font-size:14px;margin-bottom:10px;color:var(--ink-2)}
+  .editor .who b{font-size:18px;color:var(--ink)}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+  .chip{padding:6px 10px;border:1px solid var(--rule);border-radius:2px;background:#fff;font-family:var(--mono);font-size:15px;color:var(--ink-2)}
+  .chip.picked{background:var(--signal);border-color:var(--signal);color:#fff}
+  .presets{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+  .preset{padding:6px 12px;border:1px solid var(--rule);background:#fff;border-radius:2px;font-size:13px;color:var(--ink-2)}
+  .preset.picked{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .rules{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px}
+  .rule{display:flex;align-items:center;padding:7px 9px;border:1px solid var(--rule-2);border-radius:2px;background:#fff;font-size:13px;text-align:left;color:var(--ink-2)}
+  .rule.picked{border-color:var(--signal);background:var(--signal-soft);color:var(--signal)}
+  .rule code{font-family:var(--mono);font-size:13px;letter-spacing:.05em}
+
+  .viewer{margin-top:14px;background:var(--dark);border-radius:3px;overflow:hidden}
+  .viewport{height:200px;overflow:hidden;position:relative;cursor:grab}
+  .viewport.drag{cursor:grabbing}
+  .viewport img{position:absolute;top:0;left:0;transform-origin:0 0;image-rendering:pixelated;user-select:none;-webkit-user-drag:none}
+  .zoombar{display:flex;align-items:center;gap:10px;padding:9px 12px;border-top:1px solid #2C3136;color:#9AA2A8;font-size:12px}
+  .zoombar input[type=range]{flex:1;accent-color:#F2C14E;width:auto}
+
+  .tabs{display:flex;gap:2px;margin:14px 0 9px;flex-wrap:wrap}
+  .tab{padding:6px 12px;border:1px solid var(--rule);background:#fff;border-radius:2px;font-size:13px;color:var(--ink-2)}
+  .tab.picked{background:var(--ink);color:#fff;border-color:var(--ink)}
+  ol.results{list-style:none;margin:0;padding:0;border:1px solid var(--rule);border-radius:3px;background:var(--card);max-height:440px;overflow-y:auto}
+  ol.results li{display:flex;gap:11px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--rule-2);flex-wrap:wrap}
+  ol.results li:last-child{border-bottom:0}
+  ol.results li:nth-child(odd){background:var(--card-2)}
+  .num{font-family:var(--mono);font-size:12px;color:var(--mute);width:38px;flex:0 0 38px}
+  .val{flex:1 1 300px;font-family:var(--mono);font-size:13.5px;word-break:break-all}
+  .val mark{background:var(--warn-soft);color:var(--warn);font-weight:600;padding:0 1px;border-radius:2px}
+  li.dead .val{text-decoration:line-through;opacity:.4}
+  li.dead .val mark{background:none;color:inherit}
+  li.ok{background:var(--live-soft)!important}
+  li.ok .val{font-weight:600}
+  li.maybe .val{color:var(--warn)}
+  .acts{display:flex;gap:6px;flex-wrap:wrap}
+  .acts a,.acts button{padding:4px 9px;font-size:12px;border:1px solid var(--rule);background:#fff;border-radius:2px;color:var(--ink-2);text-decoration:none}
+  .acts a:hover,.acts button:hover{border-color:var(--ink);color:var(--ink)}
+  .empty{padding:24px;text-align:center;color:var(--mute);font-size:14px;border:1px dashed var(--rule);border-radius:3px;background:var(--card)}
+
+  details{border:1px solid var(--rule);border-radius:3px;background:var(--card);padding:12px 15px;margin-top:11px}
+  details summary{cursor:pointer;font-size:14px;font-weight:500}
+  details[open] summary{margin-bottom:13px;padding-bottom:11px;border-bottom:1px solid var(--rule-2)}
+  .hint{font-size:13px;color:var(--ink-2);margin-top:10px}
+  .hint.bad{color:var(--warn)}
+  .hint code{font-family:var(--mono);background:var(--card-2);padding:1px 4px;border-radius:2px}
+  ol.steps{margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-2)}
+  ol.steps li{margin-bottom:5px}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:3px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .18s;z-index:50}
+  .toast.show{opacity:1}
+  footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--rule);color:var(--mute);font-size:13px}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+  @media (max-width:620px){.cell{width:32px;height:46px;font-size:17px}.strip div{flex:1 1 50%}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="mast">
+    <h1>Drop the screenshot.<br>Get back the link that opens.</h1>
+    <p>It reads the address out of the picture, swaps every character that has a look-alike twin, then actually visits each version until one comes back alive.</p>
+  </header>
+
+  <section>
+    <div class="drop" id="drop">
+      <h3>Drop the screenshot here</h3>
+      <p>Or paste it with ⌘V / Ctrl+V</p>
+      <button class="btn ghost" id="pickBtn">Choose a file</button>
+      <input type="file" id="file" accept="image/*" hidden>
+    </div>
+    <div class="or">or type out what you managed to read</div>
+    <div class="panel">
+      <label class="field" style="margin-bottom:12px">
+        <span>The link, as best you can make it out</span>
+        <input type="text" id="pasteUrl" spellcheck="false" autocomplete="off" placeholder="https://drive.google.com/drive/folders/…">
+      </label>
+      <div class="row">
+        <button class="btn go big" id="runBtn">Find the link that opens</button>
+        <button class="btn ghost" id="stopBtn" disabled>Stop</button>
+        <span id="kindNote" style="font-size:13px;color:var(--mute)"></span>
+      </div>
+      <div class="bar" id="barWrap" hidden><i id="bar"></i></div>
+      <div class="console" id="log" hidden></div>
+    </div>
+    <div id="verdict"></div>
+    <p class="hint" id="lenHint"></p>
+    <div class="viewer" id="viewer" hidden>
+      <div class="viewport" id="viewport"><img id="shot" alt="The screenshot you dropped in"></div>
+      <div class="zoombar">
+        <span>Zoom</span><input type="range" id="zoom" min="100" max="900" value="280"><span id="zoomVal">2.8×</span>
+        <button class="btn ghost small" id="ocrBtn">Read it again</button>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head"><h2>Adjust it by hand</h2><span class="note">Only needed when autopilot comes up empty.</span></div>
+
+    <details id="dGrid">
+      <summary>Which characters are in doubt</summary>
+      <div>
+        <div class="row" style="margin-bottom:13px">
+          <label class="field" style="margin:0;flex:1 1 320px"><span>Fixed part, with <code>{ID}</code> marking the uncertain text</span>
+            <input type="text" id="tpl" spellcheck="false" autocomplete="off"></label>
+          <label class="field" style="margin:0;flex:1 1 260px"><span>Uncertain part</span>
+            <input type="text" id="idIn" spellcheck="false" autocomplete="off"></label>
+        </div>
+        <div class="presets" id="presets"></div>
+        <div class="gridwrap"><div class="grid" id="grid"></div></div>
+        <div class="editor" id="editor" hidden></div>
+        <div class="strip">
+          <div><b id="statChars">0</b><small>characters in doubt</small></div>
+          <div id="comboBox"><b id="statCombos">1</b><small>possible readings</small></div>
+          <div><b id="statShown">0</b><small>built</small></div>
+          <div><b id="statLeft">0</b><small>untested</small></div>
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>Look-alike sets and length repairs</summary>
+      <div>
+        <div class="rules" id="rules"></div>
+        <label class="check" style="margin-top:14px"><input type="checkbox" id="multiChk">
+          <span>Two-letter swaps found in the text: rn ↔ m, vv ↔ w, cl ↔ d, ii ↔ n</span></label>
+        <label class="check"><input type="checkbox" id="charsetChk" checked>
+          <span>Drop candidates using characters that cannot appear in a Google or YouTube id</span></label>
+        <label class="check"><input type="checkbox" id="delChk" checked>
+          <span>One character too long: also try removing each one. Wrapped screenshots often duplicate a character at the break.</span></label>
+        <label class="check"><input type="checkbox" id="insChk">
+          <span>One character too short: try inserting the missing one. That is a few thousand tries, so switch on the Drive API key below first.</span></label>
+        <label class="field" style="margin-top:12px"><span>Stop after this many candidates</span>
+          <select id="cap"><option>200</option><option selected>1000</option><option>5000</option><option>25000</option></select></label>
+      </div>
+    </details>
+
+    <details id="dEngine">
+      <summary>How candidates get tested</summary>
+      <div>
+        <p class="hint" style="margin-top:0">A page cannot read another site's response on its own, so this borrows public read-only relays. They need no setup but are rate limited, so long runs crawl.</p>
+        <div class="rules" id="engines" style="margin-bottom:14px"></div>
+        <label class="field"><span>Google Drive API key, optional. Roughly fifty times faster on Drive links.</span>
+          <input type="password" id="apiKey" placeholder="AIza…" autocomplete="off"></label>
+        <ol class="steps">
+          <li>Open console.cloud.google.com and make a project.</li>
+          <li>Under APIs &amp; Services, enable <b>Google Drive API</b>.</li>
+          <li>Under Credentials, create an <b>API key</b>.</li>
+          <li>Restrict it to your Pages address so nobody else spends your quota.</li>
+        </ol>
+        <p class="hint">The key stays in this page and goes only to Google. It finds folders shared with anyone-who-has-the-link. A folder locked to named people looks missing to the key, which is why the relays stay switched on alongside it.</p>
+        <label class="field" style="margin-top:12px"><span>How many checks at once</span>
+          <select id="conc"><option>2</option><option selected>4</option><option>8</option><option>16</option></select></label>
+      </div>
+    </details>
+  </section>
+
+  <section>
+    <div class="head"><h2>Every candidate</h2><span class="note" id="resNote"></span></div>
+    <div class="tabs" id="tabs"></div>
+    <div id="resBox"></div>
+  </section>
+
+  <footer>The picture never leaves your device. Only the candidate addresses go out, to whichever checker you pick.</footer>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+"use strict";
+
+/* ===================== look-alike sets ===================== */
+var SETS=[
+ {id:"l1I", show:"l I 1 i | !", chars:["l","I","1","i","|","!"]},
+ {id:"0Oo", show:"0 O o",       chars:["0","O","o"]},
+ {id:"OQD", show:"O Q D 0",     chars:["O","Q","D","0"]},
+ {id:"5S",  show:"5 S s",       chars:["5","S","s"]},
+ {id:"2Z",  show:"2 Z z",       chars:["2","Z","z"]},
+ {id:"8B",  show:"8 B",         chars:["8","B"]},
+ {id:"6Gb", show:"6 G b",       chars:["6","G","b"]},
+ {id:"9gq", show:"9 g q",       chars:["9","g","q"]},
+ {id:"7T",  show:"7 T",         chars:["7","T"]},
+ {id:"4A",  show:"4 A",         chars:["4","A"]},
+ {id:"3B",  show:"3 B E",       chars:["3","B","E"]},
+ {id:"UV",  show:"U V u v",     chars:["U","V","u","v"]},
+ {id:"CG",  show:"C G",         chars:["C","G"]},
+ {id:"EF",  show:"E F",         chars:["E","F"]},
+ {id:"nh",  show:"n h",         chars:["n","h"]},
+ {id:"ce",  show:"c e",         chars:["c","e"]},
+ {id:"tf",  show:"t f",         chars:["t","f"]},
+ {id:"YV",  show:"Y V y v",     chars:["Y","V","y","v"]},
+ {id:"KX",  show:"K X x k",     chars:["K","X","x","k"]},
+ {id:"MN",  show:"M N W",       chars:["M","N","W"]},
+ {id:"dash",show:"- _ ~ .",     chars:["-","_","~","."]},
+ {id:"case",show:"c/C o/O s/S u/U v/V w/W x/X z/Z", chars:[],
+  pairs:[["c","C"],["o","O"],["p","P"],["s","S"],["u","U"],["v","V"],["w","W"],["x","X"],["z","Z"],["k","K"],["y","Y"],["j","J"],["f","F"]]}
+];
+var MULTI=[["rn","m"],["m","rn"],["vv","w"],["w","vv"],["cl","d"],["d","cl"],["ii","n"],["n","ii"],["nn","m"],["ri","n"]];
+var PRESETS={
+ tight: {name:"l I 1 and 0 O only", sets:["l1I","0Oo"]},
+ normal:{name:"Usual suspects",     sets:["l1I","0Oo","OQD","5S","2Z","8B","6Gb","9gq"]},
+ wide:  {name:"Add letter shapes",  sets:["l1I","0Oo","OQD","5S","2Z","8B","6Gb","9gq","7T","4A","3B","UV","CG","EF","case"]},
+ all:   {name:"Everything",         sets:SETS.map(function(s){return s.id})},
+ none:  {name:"Nothing",            sets:[]}
+};
+var ALPHABET="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
+var LEGAL=/^[A-Za-z0-9_\-]$/;
+
+/* ===================== state ===================== */
+var S={
+ tpl:"https://drive.google.com/drive/folders/{ID}",
+ id:"", want:[], kind:"", drive:false,
+ preset:"normal", sets:new Set(PRESETS.normal.sets),
+ custom:{}, off:new Set(),
+ multi:false, charset:true, del:true, ins:false,
+ cap:1000, sel:null,
+ results:[], filter:"all", running:false, found:null,
+ engines:new Set(["jina","allorigins"])
+};
+function $(id){return document.getElementById(id)}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+var tT; function toast(m){var t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(tT);tT=setTimeout(function(){t.classList.remove("show")},1900)}
+function log(msg,cls){
+ var b=$("log"); b.hidden=false;
+ var d=document.createElement("div"); if(cls) d.className=cls; d.textContent=msg;
+ b.appendChild(d); b.scrollTop=b.scrollHeight;
+}
+function clearLog(){ $("log").innerHTML=""; $("log").hidden=true }
+function sleep(ms){ return new Promise(function(r){setTimeout(r,ms)}) }
+
+/* ===================== alternatives ===================== */
+function twinsFrom(ch,onlyActive){
+ var out=[];
+ SETS.forEach(function(set){
+  if(onlyActive && !S.sets.has(set.id)) return;
+  if(set.chars.indexOf(ch)>-1) set.chars.forEach(function(c){ if(c!==ch&&out.indexOf(c)<0) out.push(c) });
+  if(set.pairs) set.pairs.forEach(function(p){
+   if(p[0]===ch&&out.indexOf(p[1])<0) out.push(p[1]);
+   if(p[1]===ch&&out.indexOf(p[0])<0) out.push(p[0]);
+  });
+ });
+ return out;
+}
+function legal(list){ return S.charset ? list.filter(function(c){return c.split("").every(function(k){return LEGAL.test(k)})}) : list }
+function optsAt(base,i){
+ if(S.off.has(i)) return [];
+ var list=Object.prototype.hasOwnProperty.call(S.custom,i)? S.custom[i].slice() : twinsFrom(base[i],true);
+ return legal(list);
+}
+function slotsFor(base,useCustom){
+ var out=[],i;
+ for(i=0;i<base.length;i++){
+  var o=useCustom? optsAt(base,i) : legal(twinsFrom(base[i],true));
+  if(o.length) out.push({i:i,len:1,opts:o});
+ }
+ if(S.multi) MULTI.forEach(function(p){
+  var at=base.indexOf(p[0]);
+  while(at>-1){ out.push({i:at,len:p[0].length,opts:[p[1]]}); at=base.indexOf(p[0],at+1) }
+ });
+ out.sort(function(a,b){return a.i-b.i||a.len-b.len});
+ return out;
+}
+function comboCount(sl){ var n=1,i; for(i=0;i<sl.length;i++){ n*=(sl[i].opts.length+1); if(n>1e12) return Infinity } return n }
+
+/* ===================== generation ===================== */
+function applyChanges(base,changes){
+ var out="",prev=0,marks=[];
+ changes.slice().sort(function(a,b){return a.slot.i-b.slot.i}).forEach(function(c){
+  out+=base.slice(prev,c.slot.i);
+  marks.push([out.length,out.length+c.alt.length]);
+  out+=c.alt; prev=c.slot.i+c.slot.len;
+ });
+ out+=base.slice(prev);
+ return {id:out,marks:marks,status:"new"};
+}
+function generateFrom(base,sl,cap,seen,out){
+ var n=sl.length;
+ function push(changes){
+  var c=applyChanges(base,changes);
+  if(!seen[c.id]){ seen[c.id]=1; out.push(c) }
+  return out.length<cap;
+ }
+ for(var k=0;k<=n;k++){
+  var idx=[],a; for(a=0;a<k;a++) idx.push(a);
+  while(true){
+   var clash=false,b;
+   for(b=1;b<k;b++){ var s1=sl[idx[b-1]],s2=sl[idx[b]]; if(s1.i+s1.len>s2.i){clash=true;break} }
+   if(!clash){
+    var cnt=new Array(k),z; for(z=0;z<k;z++) cnt[z]=0;
+    while(true){
+     var ch=[],q; for(q=0;q<k;q++) ch.push({slot:sl[idx[q]],alt:sl[idx[q]].opts[cnt[q]]});
+     if(!push(ch)) return out;
+     var p=k-1;
+     while(p>=0){ cnt[p]++; if(cnt[p]<sl[idx[p]].opts.length) break; cnt[p]=0; p-- }
+     if(p<0) break;
+    }
+   }
+   var m=k-1;
+   while(m>=0 && idx[m]===n-k+m) m--;
+   if(m<0) break;
+   idx[m]++;
+   for(var w=m+1;w<k;w++) idx[w]=idx[w-1]+1;
+  }
+ }
+ return out;
+}
+function nearestWant(){
+ if(!S.want.length) return null;
+ return S.want.reduce(function(a,b){ return Math.abs(b-S.id.length)<Math.abs(a-S.id.length)? b : a });
+}
+function buildAll(){
+ var seen={},out=[],cap=S.cap,target=nearestWant(),L=S.id.length;
+ var i,j,k2,b,c2,bases=[];
+
+ // A wrong length can never be fixed by swapping, so repair the length first
+ // and spend the whole budget on candidates that could actually be right.
+ if(target!==null && L===target+1 && S.del){
+  log("One character too long, so every single deletion goes first.","y");
+  for(i=0;i<L;i++){
+   b=S.id.slice(0,i)+S.id.slice(i+1);
+   if(!seen[b]){ seen[b]=1; out.push({id:b,marks:[],status:"new"}); bases.push(b) }
+  }
+ } else if(target!==null && L===target-1 && S.ins){
+  log("One character short, so every single insertion goes first.","y");
+  for(j=0;j<=L;j++) for(k2=0;k2<ALPHABET.length;k2++){
+   c2=S.id.slice(0,j)+ALPHABET.charAt(k2)+S.id.slice(j);
+   if(!seen[c2] && out.length<cap){ seen[c2]=1; out.push({id:c2,marks:[[j,j+1]],status:"new"}); bases.push(c2) }
+  }
+ } else {
+  bases.push(S.id);
+  if(target!==null && L!==target) log("Length is off by "+Math.abs(L-target)+" and no repair covers that. Swapping alone will not find it.","r");
+ }
+
+ for(i=0;i<bases.length && out.length<cap;i++)
+  generateFrom(bases[i], slotsFor(bases[i], bases[i]===S.id), cap, seen, out);
+
+ return out;
+}
+function urlFor(id){ return S.tpl.indexOf("{ID}")>-1? S.tpl.replace("{ID}",id) : S.tpl+id }
+function marked(c){
+ var out="",at=0;
+ (c.marks||[]).forEach(function(m){ out+=esc(c.id.slice(at,m[0]))+"<mark>"+esc(c.id.slice(m[0],m[1]))+"</mark>"; at=m[1] });
+ return out+esc(c.id.slice(at));
+}
+
+/* ===================== splitting a link ===================== */
+var SHAPES=[
+ {re:/^(https?:\/\/drive\.google\.com\/drive\/(?:u\/\d+\/)?folders\/)([^\/?#]+)(.*)$/,kind:"Google Drive folder",want:[33,28],drive:true},
+ {re:/^(https?:\/\/drive\.google\.com\/(?:file\/d\/|open\?id=))([^\/?#&]+)(.*)$/,kind:"Google Drive file",want:[33,28],drive:true},
+ {re:/^(https?:\/\/docs\.google\.com\/[a-z]+\/d\/)([^\/?#]+)(.*)$/,kind:"Google Docs file",want:[44,33],drive:true},
+ {re:/^(https?:\/\/(?:www\.)?youtube\.com\/watch\?v=)([^&#]+)(.*)$/,kind:"YouTube video",want:[11],drive:false},
+ {re:/^(https?:\/\/youtu\.be\/)([^\/?#]+)(.*)$/,kind:"YouTube video",want:[11],drive:false},
+ {re:/^(https?:\/\/[^\/]+\/(?:[^\/?#]+\/)*)([A-Za-z0-9_\-]{6,})([\/?#].*)?$/,kind:"link",want:[],drive:false}
+];
+function splitUrl(url){
+ url=url.trim().replace(/[)\].,;'"]+$/,"");
+ for(var i=0;i<SHAPES.length;i++){
+  var m=url.match(SHAPES[i].re);
+  if(m) return {tpl:m[1]+"{ID}"+(m[3]||""),id:m[2],kind:SHAPES[i].kind,want:SHAPES[i].want,drive:SHAPES[i].drive};
+ }
+ var run=url.match(/[A-Za-z0-9_\-]{8,}/g);
+ if(run){
+  run.sort(function(a,b){return b.length-a.length});
+  var at=url.indexOf(run[0]);
+  return {tpl:url.slice(0,at)+"{ID}"+url.slice(at+run[0].length),id:run[0],kind:"link",want:[],drive:false};
+ }
+ return {tpl:"{ID}",id:url,kind:"link",want:[],drive:false};
+}
+function loadUrl(u){
+ var r=splitUrl(u);
+ S.tpl=r.tpl; S.id=r.id; S.want=r.want; S.kind=r.kind; S.drive=r.drive;
+ S.custom={}; S.off=new Set(); S.sel=null; S.results=[]; S.found=null;
+ $("tpl").value=S.tpl; $("idIn").value=S.id; $("pasteUrl").value=u;
+ $("kindNote").textContent=r.kind+", "+r.id.length+" characters";
+ drawAll(); drawResults();
+}
+
+/* ===================== checkers ===================== */
+var DEAD=["error 404 (not found)","that\u2019s an error","that's an error","the requested url was not found","page not found","sorry, unable to open the file","no longer exists","404 not found","error 400"];
+var ALIVE=["google drive","request access","you need access","docs.google.com","youtube"];
+
+var CHECKERS={
+ driveapi:{
+  label:"Drive API",
+  usable:function(){ return !!$("apiKey").value.trim() && S.drive },
+  check:async function(id){
+   var k=$("apiKey").value.trim();
+   var r=await fetch("https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(id)+"?fields=id,name&supportsAllDrives=true&key="+encodeURIComponent(k));
+   if(r.status===200){ var j=await r.json(); return {live:true,name:j.name||""} }
+   if(r.status===404) return {live:false};
+   if(r.status===403){
+    var e=await r.json().catch(function(){return{}});
+    var msg=(e.error&&e.error.message)||"";
+    if(/not valid|unregistered|blocked|referer/i.test(msg)) throw new Error("key rejected, "+msg.slice(0,50));
+    return {live:null};
+   }
+   if(r.status===429) throw new Error("rate limited");
+   return {live:null};
+  }
+ },
+ jina:{
+  label:"r.jina.ai",
+  usable:function(){ return true },
+  check:async function(id){
+   var r=await fetch("https://r.jina.ai/"+urlFor(id));
+   if(!r.ok) throw new Error("http "+r.status);
+   var raw=await r.text(), t=raw.toLowerCase();
+   if(DEAD.some(function(m){return t.indexOf(m)>-1})) return {live:false};
+   if(ALIVE.some(function(m){return t.indexOf(m)>-1})){
+    var n=raw.match(/Title:\s*(.+)/);
+    return {live:true,name:n? n[1].trim().slice(0,90) : ""};
+   }
+   return {live:null};
+  }
+ },
+ allorigins:{
+  label:"allorigins",
+  usable:function(){ return true },
+  check:async function(id){
+   var r=await fetch("https://api.allorigins.win/get?url="+encodeURIComponent(urlFor(id)));
+   if(!r.ok) throw new Error("http "+r.status);
+   var j=await r.json();
+   var code=j.status&&j.status.http_code, body=j.contents||"", t=body.toLowerCase();
+   if(code===404||code===410) return {live:false};
+   if(DEAD.some(function(m){return t.indexOf(m)>-1})) return {live:false};
+   if(code===200&&body.length>2000){
+    var n=body.match(/<title>([^<]*)<\/title>/i);
+    return {live:true,name:n? n[1].slice(0,90) : ""};
+   }
+   return {live:null};
+  }
+ },
+ codetabs:{
+  label:"codetabs",
+  usable:function(){ return true },
+  check:async function(id){
+   var r=await fetch("https://api.codetabs.com/v1/proxy?quest="+encodeURIComponent(urlFor(id)));
+   if(r.status===404) return {live:false};
+   if(!r.ok) throw new Error("http "+r.status);
+   var body=await r.text(), t=body.toLowerCase();
+   if(DEAD.some(function(m){return t.indexOf(m)>-1})) return {live:false};
+   if(body.length>2000){
+    var n=body.match(/<title>([^<]*)<\/title>/i);
+    return {live:true,name:n? n[1].slice(0,90) : ""};
+   }
+   return {live:null};
+  }
+ }
+};
+function activePool(){
+ var pool=[];
+ if(CHECKERS.driveapi.usable()) pool.push("driveapi");
+ ["jina","allorigins","codetabs"].forEach(function(k){ if(S.engines.has(k)) pool.push(k) });
+ return pool;
+}
+
+/* ===================== the run ===================== */
+async function run(){
+ var typed=$("pasteUrl").value.trim();
+ if(!typed){ toast("Drop a screenshot or type the link first"); return }
+ if(typed!==urlFor(S.id)) loadUrl(typed);
+ if(!S.id){ toast("Nothing to work with"); return }
+
+ $("verdict").innerHTML=""; S.found=null;
+ S.running=true; $("runBtn").disabled=true; $("stopBtn").disabled=false;
+ $("barWrap").hidden=false; $("bar").style.width="0%";
+
+ log("Reading a "+S.kind+", "+S.id.length+" characters.");
+ if(S.want.length && S.want.indexOf(S.id.length)<0)
+  log("That length is unusual. A "+S.kind+" normally has "+S.want.join(" or ")+".","y");
+
+ var space=comboCount(slotsFor(S.id,true));
+ S.results=buildAll();
+ log("Built "+S.results.length+" candidate"+(S.results.length===1?"":"s")+", closest reading first.");
+ if(space!==Infinity && space>S.results.length)
+  log("There are "+space.toLocaleString()+" readings in all. Only the closest "+S.results.length+" get tested, so raise the limit if nothing turns up.","d");
+ S.filter="all"; drawResults();
+
+ var pool=activePool();
+ if(!pool.length){ log("No checker is switched on.","r"); finish(); return }
+ log("Testing through: "+pool.map(function(p){return CHECKERS[p].label}).join(", "));
+
+ var next=0,done=0,dead=0,unclear=0,fails={},total=S.results.length;
+ var lanes=Math.max(1,parseInt($("conc").value,10)||4);
+
+ async function worker(lane){
+  while(S.running && !S.found){
+   var my=next++; if(my>=total) return;
+   var cand=S.results[my];
+   var order=pool.filter(function(p){ return (fails[p]||0)<4 });
+   if(!order.length){ log("Every checker stopped answering. Open the survivors by hand.","r"); S.running=false; return }
+   var pick=order[(my+lane)%order.length];
+   try{
+    var res=await CHECKERS[pick].check(cand.id);
+    fails[pick]=0;
+    if(res.live===true){
+     cand.status="ok"; cand.name=res.name||"";
+     S.found=cand;
+     log("OPENS  "+cand.id+(res.name? "   "+res.name : ""),"g");
+     S.running=false; return;
+    }
+    if(res.live===false){ cand.status="dead"; dead++ } else { cand.status="maybe"; unclear++ }
+   }catch(e){
+    fails[pick]=(fails[pick]||0)+1;
+    cand.status="new"; next--;
+    if(fails[pick]===1) log(CHECKERS[pick].label+" trouble: "+e.message,"y");
+    if(fails[pick]===4) log(CHECKERS[pick].label+" dropped from the pool.","r");
+    await sleep(900);
+    continue;
+   }
+   done++;
+   if(done%4===0||done===total){
+    $("bar").style.width=Math.round(done/total*100)+"%";
+    if(done%20===0) log("checked "+done+" of "+total+"    ruled out "+dead+(unclear? "    unclear "+unclear : ""),"d");
+    drawResults();
+   }
+   if(pick!=="driveapi") await sleep(250);
+  }
+ }
+ var jobs=[],L; for(L=0;L<lanes;L++) jobs.push(worker(L));
+ await Promise.all(jobs);
+ finish(unclear);
+}
+function finish(unclear){
+ S.running=false; $("runBtn").disabled=false; $("stopBtn").disabled=true;
+ $("bar").style.width="100%";
+ drawResults(); drawVerdict(unclear);
+}
+function drawVerdict(){
+ var v=$("verdict");
+ if(S.found){
+  var u=urlFor(S.found.id);
+  v.innerHTML='<div class="verdict"><h3>This one opens</h3>'+
+   (S.found.name? '<div class="name">'+esc(S.found.name)+'</div>' : '')+
+   '<div class="link">'+esc(S.tpl.split("{ID}")[0])+marked(S.found)+esc(S.tpl.split("{ID}")[1]||"")+'</div>'+
+   '<div class="row"><a class="btn live" href="'+esc(u)+'" target="_blank" rel="noopener">Open it</a>'+
+   '<button class="btn ghost" id="copyWin">Copy the link</button></div></div>';
+  $("copyWin").onclick=function(){ copy(u) };
+  copy(u); toast("Found it, and copied it for you.");
+  return;
+ }
+ var maybes=S.results.filter(function(r){return r.status==="maybe"}).length;
+ var untested=S.results.filter(function(r){return r.status==="new"}).length;
+ v.innerHTML='<div class="verdict none"><h3>Nothing opened</h3><div class="name">'+
+  (maybes? maybes+' came back unclear, listed under <b>Unclear</b> below and worth opening yourself. ' : '')+
+  (untested? untested+' were never reached. ' : '')+
+  'If the length was short by one, a character was lost at the line break and no amount of swapping will find it. Check the picture at the wrap point.</div>'+
+  '<div class="row"><button class="btn ghost" id="widen">Widen the sets and run again</button></div></div>';
+ $("widen").onclick=function(){
+  var order=["tight","normal","wide","all"], at=order.indexOf(S.preset);
+  S.preset=order[Math.min(order.length-1,at+1)];
+  S.sets=new Set(PRESETS[S.preset].sets); S.custom={}; S.off=new Set();
+  log("Widened to: "+PRESETS[S.preset].name,"y");
+  drawAll(); run();
+ };
+}
+
+/* ===================== drawing ===================== */
+function drawPresets(){
+ var box=$("presets"); box.innerHTML="";
+ Object.keys(PRESETS).forEach(function(k){
+  var b=document.createElement("button");
+  b.className="preset"+(S.preset===k?" picked":"");
+  b.textContent=PRESETS[k].name;
+  b.onclick=function(){ S.preset=k; S.sets=new Set(PRESETS[k].sets); S.custom={}; S.off=new Set(); S.sel=null; drawAll() };
+  box.appendChild(b);
+ });
+}
+function drawRules(){
+ var box=$("rules"); box.innerHTML="";
+ SETS.forEach(function(set){
+  var b=document.createElement("button");
+  b.className="rule"+(S.sets.has(set.id)?" picked":"");
+  b.innerHTML="<code>"+esc(set.show)+"</code>";
+  b.onclick=function(){ if(S.sets.has(set.id)) S.sets.delete(set.id); else S.sets.add(set.id); S.preset="\u2014"; drawAll() };
+  box.appendChild(b);
+ });
+}
+function drawEngines(){
+ var box=$("engines"); box.innerHTML="";
+ [["jina","r.jina.ai relay"],["allorigins","allorigins relay"],["codetabs","codetabs relay"]].forEach(function(e){
+  var b=document.createElement("button");
+  b.className="rule"+(S.engines.has(e[0])?" picked":"");
+  b.textContent=e[1];
+  b.onclick=function(){ if(S.engines.has(e[0])) S.engines.delete(e[0]); else S.engines.add(e[0]); drawEngines() };
+  box.appendChild(b);
+ });
+}
+function drawGrid(){
+ var g=$("grid"); g.innerHTML="";
+ if(!S.id){ g.innerHTML='<span style="padding:10px 2px;color:var(--mute);font-size:14px">Nothing loaded yet.</span>'; return }
+ for(var i=0;i<S.id.length;i++)(function(i){
+  var o=optsAt(S.id,i), b=document.createElement("button");
+  b.className="cell"+(o.length?" on":"")+(S.off.has(i)?" off":"")+(S.sel===i?" sel":"");
+  b.setAttribute("data-n",o.length? String(o.length+1) : "");
+  b.setAttribute("aria-label","Character "+(i+1)+", "+S.id.charAt(i));
+  b.innerHTML=esc(S.id.charAt(i))+((i+1)%5===0? '<span class="tick">'+(i+1)+'</span>' : '');
+  b.onclick=function(){ S.sel=(S.sel===i? null : i); drawGrid(); drawEditor() };
+  g.appendChild(b);
+ })(i);
+}
+function drawEditor(){
+ var e=$("editor");
+ if(S.sel===null||!S.id){ e.hidden=true; return }
+ e.hidden=false;
+ var i=S.sel, ch=S.id.charAt(i), cur=optsAt(S.id,i), all=legal(twinsFrom(ch,false));
+ var h='<div class="who">Character '+(i+1)+' of '+S.id.length+' &nbsp; <b>'+esc(ch)+'</b></div><div class="chips">';
+ if(!all.length) h+='<span style="color:var(--mute);font-size:13px">No twin on file. Add one below.</span>';
+ all.forEach(function(c){ h+='<button class="chip'+(cur.indexOf(c)>-1?" picked":"")+'" data-c="'+esc(c)+'">'+esc(c)+'</button>' });
+ h+='</div><div class="row"><button class="btn ghost small" data-act="none">None here</button>'
+  +'<button class="btn ghost small" data-act="all">All of them</button>'
+  +'<button class="btn ghost small" data-act="reset">Back to default</button>'
+  +'<input type="text" id="manualIn" placeholder="your own" style="width:120px;padding:5px 8px;font-size:13px">'
+  +'<button class="btn ghost small" data-act="add">Add</button></div>';
+ e.innerHTML=h;
+ e.querySelectorAll(".chip").forEach(function(b){
+  b.onclick=function(){
+   var c=b.getAttribute("data-c"), list=optsAt(S.id,i).slice(), at=list.indexOf(c);
+   if(at>-1) list.splice(at,1); else list.push(c);
+   S.custom[i]=list; S.off.delete(i); if(!list.length) S.off.add(i);
+   drawAll();
+  };
+ });
+ e.querySelectorAll("[data-act]").forEach(function(b){
+  b.onclick=function(){
+   var a=b.getAttribute("data-act");
+   if(a==="none"){ S.custom[i]=[]; S.off.add(i) }
+   if(a==="all"){ S.custom[i]=all.slice(); S.off.delete(i) }
+   if(a==="reset"){ delete S.custom[i]; S.off.delete(i) }
+   if(a==="add"){ var v=$("manualIn").value.trim(); if(v){ var l=optsAt(S.id,i).slice(); if(l.indexOf(v)<0) l.push(v); S.custom[i]=l; S.off.delete(i) } }
+   drawAll();
+  };
+ });
+}
+function drawStats(){
+ var sl=S.id? slotsFor(S.id,true) : [], n=comboCount(sl);
+ $("statChars").textContent=sl.length;
+ $("statCombos").textContent=n===Infinity? "huge" : n.toLocaleString();
+ $("comboBox").className=(n>S.cap? "bad" : "");
+ $("statShown").textContent=S.results.length;
+ $("statLeft").textContent=S.results.filter(function(r){return r.status==="new"}).length;
+}
+function drawHint(){
+ var h=$("lenHint"), L=S.id.length;
+ if(!L){ h.textContent=""; h.className="hint"; return }
+ if(S.want.length && S.want.indexOf(L)<0){
+  h.className="hint bad";
+  h.innerHTML="That reads as <code>"+L+"</code> characters. A "+S.kind+" normally has "+S.want.join(" or ")+", so a character was probably gained or lost at the line break.";
+ } else {
+  h.className="hint";
+  h.innerHTML="That reads as <code>"+L+"</code> characters"+(S.want.length? ", the right length for a "+S.kind+"." : ".");
+ }
+}
+function drawAll(){ drawPresets(); drawRules(); drawGrid(); drawEditor(); drawStats(); drawHint() }
+
+function drawTabs(){
+ var c={all:S.results.length,new:0,dead:0,ok:0,maybe:0};
+ S.results.forEach(function(r){ c[r.status]=(c[r.status]||0)+1 });
+ var t=$("tabs"); t.innerHTML="";
+ [["all","Everything"],["ok","Opens"],["maybe","Unclear"],["new","Untested"],["dead","Ruled out"]].forEach(function(d){
+  var b=document.createElement("button");
+  b.className="tab"+(S.filter===d[0]?" picked":"");
+  b.textContent=d[1]+" ("+(c[d[0]]||0)+")";
+  b.onclick=function(){ S.filter=d[0]; drawResults() };
+  t.appendChild(b);
+ });
+}
+function drawResults(){
+ drawTabs(); drawStats();
+ var box=$("resBox");
+ if(!S.results.length){ box.innerHTML='<div class="empty">Nothing built yet.</div>'; $("resNote").textContent=""; return }
+ var rows=S.results.filter(function(r){ return S.filter==="all"||r.status===S.filter });
+ if(!rows.length){ box.innerHTML='<div class="empty">Nothing in this view.</div>'; return }
+ var ol=document.createElement("ol"); ol.className="results";
+ rows.slice(0,600).forEach(function(r){
+  var i=S.results.indexOf(r), li=document.createElement("li");
+  li.className=r.status==="dead"? "dead" : (r.status==="ok"? "ok" : (r.status==="maybe"? "maybe" : ""));
+  li.innerHTML='<span class="num">'+(i+1)+'</span><span class="val">'+marked(r)+'</span>'+
+   '<span class="acts"><a href="'+esc(urlFor(r.id))+'" target="_blank" rel="noopener">Open</a>'+
+   '<button data-a="copy">Copy</button></span>';
+  li.querySelector('[data-a="copy"]').onclick=function(){ copy(urlFor(r.id)) };
+  ol.appendChild(li);
+ });
+ box.innerHTML=""; box.appendChild(ol);
+ $("resNote").textContent=rows.length>600? "Showing the first 600 of "+rows.length+"." : "";
+}
+function copy(t){
+ function fb(x){
+  var ta=document.createElement("textarea"); ta.value=x; ta.style.position="fixed"; ta.style.opacity="0";
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand("copy"); toast("Copied") }catch(e){ toast("Copy it by hand") }
+  document.body.removeChild(ta);
+ }
+ if(navigator.clipboard&&navigator.clipboard.writeText)
+  navigator.clipboard.writeText(t).then(function(){toast("Copied")},function(){fb(t)});
+ else fb(t);
+}
+
+/* ===================== image and reading ===================== */
+var zoomV=2.8,panX=0,panY=0,dragging=false,lx=0,ly=0,imgFile=null;
+function showImage(file){
+ if(!file||!/^image\//.test(file.type)) return;
+ imgFile=file;
+ $("shot").src=URL.createObjectURL(file);
+ $("viewer").hidden=false;
+ panX=0; panY=0; applyZoom();
+ runOcr(true);
+}
+function applyZoom(){
+ $("shot").style.transform="translate("+panX+"px,"+panY+"px) scale("+zoomV+")";
+ $("zoomVal").textContent=zoomV.toFixed(1)+"\u00D7";
+}
+function prep(file,forceInvert){
+ return new Promise(function(res){
+  var img=new Image();
+  img.onload=function(){
+   var k=Math.min(4,Math.max(2,1000/img.width));
+   var c=document.createElement("canvas"); c.width=img.width*k; c.height=img.height*k;
+   var x=c.getContext("2d"); x.drawImage(img,0,0,c.width,c.height);
+   var d=x.getImageData(0,0,c.width,c.height),p=d.data,sum=0,i;
+   for(i=0;i<p.length;i+=4){ var g=0.299*p[i]+0.587*p[i+1]+0.114*p[i+2]; p[i]=p[i+1]=p[i+2]=g; sum+=g }
+   var mean=sum/(p.length/4);
+   var flip = (forceInvert===undefined)? (mean<128) : forceInvert;
+   for(i=0;i<p.length;i+=4){ var v=p[i]; if(flip) v=255-v; v=(v<145)?0:255; p[i]=p[i+1]=p[i+2]=v }
+   x.putImageData(d,0,0); res(c);
+  };
+  img.src=URL.createObjectURL(file);
+ });
+}
+async function runOcr(auto){
+ if(!imgFile){ toast("Drop a screenshot first"); return }
+ clearLog();
+ log("Loading the text reader, about 5 MB the first time.");
+ $("ocrBtn").disabled=true;
+ try{
+  if(!window.Tesseract) await new Promise(function(ok,no){
+   var s=document.createElement("script");
+   s.src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+   s.onload=ok; s.onerror=function(){ no(new Error("could not load")) };
+   document.head.appendChild(s);
+  });
+  log("Reading the picture.");
+  var w=await window.Tesseract.createWorker("eng");
+  await w.setParameters({tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_:/.?=&#~"});
+  var best="",pass;
+  for(pass=0;pass<2;pass++){
+   var canvas=await prep(imgFile,pass===0? undefined : false);
+   var out=await w.recognize(canvas);
+   var txt=(out.data.text||"").replace(/\s+/g,"");
+   var link=txt.match(/https?:\/\/\S+/);
+   var got=link? link[0] : txt;
+   if(got.length>best.length) best=got;
+   if(link&&pass===0) break;
+  }
+  await w.terminate();
+  if(best&&/https?:\/\//.test(best)){
+   log("Read it as: "+best,"g");
+   loadUrl(best);
+   if(auto) run();
+  }else if(best){
+   $("pasteUrl").value=best;
+   log("No full address found. The raw reading is in the box, fix it and press the button.","y");
+  }else{
+   log("Nothing readable came back. Crop tighter around the link, or type it yourself.","r");
+  }
+ }catch(e){
+  log("The text reader would not load, so type the link into the box instead.","r");
+ }
+ $("ocrBtn").disabled=false;
+}
+
+/* ===================== wiring ===================== */
+$("runBtn").onclick=function(){ run() };
+$("stopBtn").onclick=function(){ S.running=false; log("Stopped.","y") };
+$("pasteUrl").addEventListener("keydown",function(e){ if(e.key==="Enter") run() });
+$("pasteUrl").addEventListener("change",function(){ if(this.value.trim()) loadUrl(this.value.trim()) });
+$("tpl").addEventListener("input",function(){ S.tpl=this.value });
+$("idIn").addEventListener("input",function(){
+ S.id=this.value.trim(); S.custom={}; S.off=new Set(); S.sel=null; S.results=[];
+ $("pasteUrl").value=urlFor(S.id); drawAll(); drawResults();
+});
+$("multiChk").onchange=function(){ S.multi=this.checked; drawAll() };
+$("charsetChk").onchange=function(){ S.charset=this.checked; drawAll() };
+$("delChk").onchange=function(){ S.del=this.checked };
+$("insChk").onchange=function(){ S.ins=this.checked };
+$("cap").onchange=function(){ S.cap=parseInt(this.value,10); drawStats() };
+
+var drop=$("drop");
+["dragenter","dragover"].forEach(function(e){ drop.addEventListener(e,function(ev){ ev.preventDefault(); drop.classList.add("over") }) });
+["dragleave","drop"].forEach(function(e){ drop.addEventListener(e,function(ev){ ev.preventDefault(); drop.classList.remove("over") }) });
+drop.addEventListener("drop",function(e){ if(e.dataTransfer&&e.dataTransfer.files[0]) showImage(e.dataTransfer.files[0]) });
+$("pickBtn").onclick=function(){ $("file").click() };
+$("file").onchange=function(){ if(this.files[0]) showImage(this.files[0]) };
+document.addEventListener("paste",function(e){
+ var it=e.clipboardData&&e.clipboardData.items; if(!it) return;
+ for(var i=0;i<it.length;i++) if(it[i].type.indexOf("image")===0){ showImage(it[i].getAsFile()); return }
+});
+$("zoom").oninput=function(){ zoomV=this.value/100; applyZoom() };
+$("ocrBtn").onclick=function(){ runOcr(false) };
+var vp=$("viewport");
+vp.addEventListener("pointerdown",function(e){ dragging=true; lx=e.clientX; ly=e.clientY; vp.classList.add("drag"); vp.setPointerCapture(e.pointerId) });
+vp.addEventListener("pointermove",function(e){ if(!dragging) return; panX+=e.clientX-lx; panY+=e.clientY-ly; lx=e.clientX; ly=e.clientY; applyZoom() });
+["pointerup","pointercancel"].forEach(function(e){ vp.addEventListener(e,function(){ dragging=false; vp.classList.remove("drag") }) });
+
+drawEngines(); drawAll(); drawResults();
+})();
+</script>
+</body>
+</html>
