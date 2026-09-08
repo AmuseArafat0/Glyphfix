@@ -98,6 +98,8 @@
   .cell.off{opacity:.45}
   .cell.sel{box-shadow:0 0 0 2px var(--ink);border-color:var(--ink)}
   .cell:hover{border-color:var(--ink-2)}
+  .cell.dis{border-color:var(--warn);background:var(--warn-soft)}
+  .cell.dis::before{content:"";position:absolute;top:3px;left:3px;width:5px;height:5px;border-radius:50%;background:var(--warn)}
   .editor{margin-top:14px;border-top:1px solid var(--rule-2);padding-top:14px}
   .editor .who{font-family:var(--mono);font-size:14px;margin-bottom:10px;color:var(--ink-2)}
   .editor .who b{font-size:18px;color:var(--ink)}
@@ -231,7 +233,7 @@
         <label class="check"><input type="checkbox" id="insChk">
           <span>One character too short: try inserting the missing one. That is a few thousand tries, so switch on the Drive API key below first.</span></label>
         <label class="field" style="margin-top:12px"><span>Stop after this many candidates</span>
-          <select id="cap"><option>200</option><option selected>1000</option><option>5000</option><option>25000</option></select></label>
+          <select id="cap"><option>200</option><option>1000</option><option selected>5000</option><option>25000</option></select></label>
       </div>
     </details>
 
@@ -240,7 +242,7 @@
       <div>
         <p class="hint" style="margin-top:0">A page cannot read another site's response on its own, so this borrows public read-only relays. They need no setup but are rate limited, so long runs crawl.</p>
         <div class="rules" id="engines" style="margin-bottom:14px"></div>
-        <label class="field"><span>Google Drive API key, optional. Roughly fifty times faster on Drive links.</span>
+        <label class="field"><span>Google Drive API key. Optional, but the free relays meter by the minute, so a long run finishes in seconds with a key and can take many minutes without one.</span>
           <input type="password" id="apiKey" placeholder="AIza…" autocomplete="off"></label>
         <ol class="steps">
           <li>Open console.cloud.google.com and make a project.</li>
@@ -269,51 +271,59 @@
 (function(){
 "use strict";
 
-/* ===================== look-alike sets ===================== */
+/* ===================== look-alike sets =====================
+   cost is in tenths. Lower cost means the swap gets tried sooner.
+   These numbers are what make a three-mistake reading reachable:
+   three cheap swaps land at 30, which is a few hundred candidates,
+   not the twelve thousand you get from counting swaps alone.        */
 var SETS=[
- {id:"l1I", show:"l I 1 i | !", chars:["l","I","1","i","|","!"]},
- {id:"0Oo", show:"0 O o",       chars:["0","O","o"]},
- {id:"OQD", show:"O Q D 0",     chars:["O","Q","D","0"]},
- {id:"5S",  show:"5 S s",       chars:["5","S","s"]},
- {id:"2Z",  show:"2 Z z",       chars:["2","Z","z"]},
- {id:"8B",  show:"8 B",         chars:["8","B"]},
- {id:"6Gb", show:"6 G b",       chars:["6","G","b"]},
- {id:"9gq", show:"9 g q",       chars:["9","g","q"]},
- {id:"7T",  show:"7 T",         chars:["7","T"]},
- {id:"4A",  show:"4 A",         chars:["4","A"]},
- {id:"3B",  show:"3 B E",       chars:["3","B","E"]},
- {id:"UV",  show:"U V u v",     chars:["U","V","u","v"]},
- {id:"CG",  show:"C G",         chars:["C","G"]},
- {id:"EF",  show:"E F",         chars:["E","F"]},
- {id:"nh",  show:"n h",         chars:["n","h"]},
- {id:"ce",  show:"c e",         chars:["c","e"]},
- {id:"tf",  show:"t f",         chars:["t","f"]},
- {id:"YV",  show:"Y V y v",     chars:["Y","V","y","v"]},
- {id:"KX",  show:"K X x k",     chars:["K","X","x","k"]},
- {id:"MN",  show:"M N W",       chars:["M","N","W"]},
- {id:"dash",show:"- _ ~ .",     chars:["-","_","~","."]},
- {id:"case",show:"c/C o/O s/S u/U v/V w/W x/X z/Z", chars:[],
-  pairs:[["c","C"],["o","O"],["p","P"],["s","S"],["u","U"],["v","V"],["w","W"],["x","X"],["z","Z"],["k","K"],["y","Y"],["j","J"],["f","F"]]}
+ {id:"l1I", show:"l I 1 i | !", cost:10, chars:["l","I","1","i","|","!"]},
+ {id:"0Oo", show:"0 O o",       cost:10, chars:["0","O","o"]},
+ {id:"5S",  show:"5 S s",       cost:12, chars:["5","S","s"]},
+ {id:"2Z",  show:"2 Z z",       cost:12, chars:["2","Z","z"]},
+ {id:"8B",  show:"8 B",         cost:12, chars:["8","B"]},
+ {id:"6Gb", show:"6 G b",       cost:13, chars:["6","G","b"]},
+ {id:"9gq", show:"9 g q",       cost:13, chars:["9","g","q"]},
+ {id:"7T",  show:"7 T",         cost:14, chars:["7","T"]},
+ {id:"4A",  show:"4 A",         cost:14, chars:["4","A"]},
+ {id:"OQD", show:"O Q D 0",     cost:15, chars:["O","Q","D","0"]},
+ {id:"case",show:"same shape, other case", cost:14, chars:[],
+  pairs:[["c","C"],["o","O"],["p","P"],["s","S"],["u","U"],["v","V"],["w","W"],["x","X"],["z","Z"],["k","K"],["y","Y"],["j","J"],["f","F"]]},
+ {id:"caseAll",show:"any letter, other case", cost:20, chars:[],
+  pairs:[["a","A"],["b","B"],["d","D"],["e","E"],["g","G"],["h","H"],["i","I"],["l","L"],["m","M"],["n","N"],["q","Q"],["r","R"],["t","T"]]},
+ {id:"3B",  show:"3 B E",       cost:18, chars:["3","B","E"]},
+ {id:"UV",  show:"U V u v",     cost:18, chars:["U","V","u","v"]},
+ {id:"CG",  show:"C G",         cost:18, chars:["C","G"]},
+ {id:"EF",  show:"E F",         cost:18, chars:["E","F"]},
+ {id:"nh",  show:"n h",         cost:18, chars:["n","h"]},
+ {id:"ce",  show:"c e",         cost:18, chars:["c","e"]},
+ {id:"tf",  show:"t f",         cost:18, chars:["t","f"]},
+ {id:"YV",  show:"Y V y v",     cost:18, chars:["Y","V","y","v"]},
+ {id:"KX",  show:"K X x k",     cost:18, chars:["K","X","x","k"]},
+ {id:"MN",  show:"M N W",       cost:18, chars:["M","N","W"]},
+ {id:"dash",show:"- _ ~ .",     cost:18, chars:["-","_","~","."]}
 ];
 var MULTI=[["rn","m"],["m","rn"],["vv","w"],["w","vv"],["cl","d"],["d","cl"],["ii","n"],["n","ii"],["nn","m"],["ri","n"]];
 var PRESETS={
  tight: {name:"l I 1 and 0 O only", sets:["l1I","0Oo"]},
- normal:{name:"Usual suspects",     sets:["l1I","0Oo","OQD","5S","2Z","8B","6Gb","9gq"]},
- wide:  {name:"Add letter shapes",  sets:["l1I","0Oo","OQD","5S","2Z","8B","6Gb","9gq","7T","4A","3B","UV","CG","EF","case"]},
+ normal:{name:"Usual suspects",     sets:["l1I","0Oo","5S","2Z","8B","6Gb","9gq","case","caseAll"]},
+ wide:  {name:"Add letter shapes",  sets:["l1I","0Oo","5S","2Z","8B","6Gb","9gq","case","caseAll","7T","4A","OQD","3B","UV","CG","EF"]},
  all:   {name:"Everything",         sets:SETS.map(function(s){return s.id})},
  none:  {name:"Nothing",            sets:[]}
 };
 var ALPHABET="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
 var LEGAL=/^[A-Za-z0-9_\-]$/;
+var OCR_COST=6;                       /* a spelling another pass actually saw */
+var BUDGETS=[0,6,10,12,14,16,18,20,22,24,26,28,30,33,36,40,45,50];
 
 /* ===================== state ===================== */
 var S={
  tpl:"https://drive.google.com/drive/folders/{ID}",
  id:"", want:[], kind:"", drive:false,
  preset:"normal", sets:new Set(PRESETS.normal.sets),
- custom:{}, off:new Set(),
+ custom:{}, off:new Set(), alts:{},
  multi:false, charset:true, del:true, ins:false,
- cap:1000, sel:null,
+ cap:5000, sel:null,
  results:[], filter:"all", running:false, found:null,
  engines:new Set(["jina","allorigins"])
 };
@@ -328,34 +338,164 @@ function log(msg,cls){
 function clearLog(){ $("log").innerHTML=""; $("log").hidden=true }
 function sleep(ms){ return new Promise(function(r){setTimeout(r,ms)}) }
 
+/* ===================== fuzzy word matching =====================
+   Everything outside the id is a word we already know. Fold the
+   look-alikes together, then a misread word still matches itself.  */
+function fold(w){
+ return String(w).toLowerCase()
+  .replace(/rn/g,"m").replace(/vv/g,"w")
+  .replace(/[il|!1]/g,"1")
+  .replace(/[o0q]/g,"0")
+  .replace(/[s5]/g,"5")
+  .replace(/[z2]/g,"2")
+  .replace(/[b8]/g,"8")
+  .replace(/[g69]/g,"6")
+  .replace(/[t7]/g,"7")
+  .replace(/[a4]/g,"4")
+  .replace(/[uv]/g,"u")
+  .replace(/[ce]/g,"c");
+}
+function lev(a,b){
+ if(a===b) return 0;
+ var m=a.length,n=b.length;
+ if(Math.abs(m-n)>3) return 9;
+ var prev=[],cur=[],i,j;
+ for(j=0;j<=n;j++) prev[j]=j;
+ for(i=1;i<=m;i++){
+  cur[0]=i;
+  for(j=1;j<=n;j++)
+   cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a.charAt(i-1)===b.charAt(j-1)?0:1));
+  for(j=0;j<=n;j++) prev[j]=cur[j];
+ }
+ return prev[n];
+}
+
+var HOSTS=["drive.google.com","docs.google.com","www.youtube.com","youtube.com","youtu.be",
+ "forms.gle","photos.app.goo.gl","maps.app.goo.gl","drive.usercontent.google.com",
+ "github.com","www.dropbox.com","dropbox.com","www.notion.so","notion.so","open.spotify.com"];
+var PATHWORDS=["drive","folders","folder","file","open","view","edit","preview","shared",
+ "document","spreadsheets","presentation","forms","watch","embeddedfolderview"];
+var QKEYS=["usp","id","v","t","list","resourcekey","export"];
+var QVALS={usp:["sharing","drive_link","share","drivesdk"],export:["download","view"]};
+
+function fixWord(seg,dict,maxDist){
+ if(!seg) return null;
+ var f=fold(seg),best=null,bd=99;
+ dict.forEach(function(w){
+  if(Math.abs(w.length-seg.length)>1) return;
+  var d=lev(f,fold(w));
+  if(d<bd){ bd=d; best=w }
+ });
+ if(best===null) return null;
+ if(bd===0) return best;
+ if(bd<=maxDist && seg.length>=4) return best;
+ return null;
+}
+
+/* Repairs everything that is not the random id: scheme, host, path
+   words, query keys and values. This is the part that was silently
+   poisoning every candidate. */
+function repairScaffold(raw){
+ var fixes=[],s=String(raw).trim().replace(/\s+/g,"");
+ s=s.replace(/^[^A-Za-z0-9]+/,"").replace(/[)\]\}.,;:'"»>]+$/,"");
+ if(!s) return {url:"",fixes:fixes};
+
+ var scheme="https",rest=s,at=s.indexOf("//");
+ if(at>-1){
+  var head=s.slice(0,at).replace(/[:\/]+$/,"");
+  rest=s.slice(at+2);
+  if(/^https?$/i.test(head)) scheme=head.toLowerCase();
+  else if(head){ fixes.push(head+":// \u2192 https://") }
+ } else {
+  var hit=null;
+  HOSTS.forEach(function(h){ if(hit) return; var k=fold(s).indexOf(fold(h)); if(k>-1) hit=k });
+  if(hit!==null && hit>0){ rest=s.slice(hit); fixes.push("dropped "+hit+" characters before the address") }
+  else if(!/^[A-Za-z0-9]/.test(rest)) return {url:s,fixes:fixes};
+  fixes.push("added the missing https://");
+ }
+
+ var slash=rest.indexOf("/");
+ var host=slash>-1? rest.slice(0,slash) : rest;
+ var tail=slash>-1? rest.slice(slash) : "";
+ var hf=fold(host),bh=null,bd=99;
+ HOSTS.forEach(function(h){ var d=lev(hf,fold(h)); if(d<bd){bd=d;bh=h} });
+ if(bh && bd<=2 && bh!==host){ fixes.push(host+" \u2192 "+bh); host=bh }
+
+ var q="",hash="";
+ var hi=tail.indexOf("#"); if(hi>-1){ hash=tail.slice(hi); tail=tail.slice(0,hi) }
+ var qi=tail.indexOf("?"); if(qi>-1){ q=tail.slice(qi+1); tail=tail.slice(0,qi) }
+
+ var segs=tail.split("/").map(function(seg){
+  if(!seg||/^\d+$/.test(seg)) return seg;
+  if(seg.length===1) return seg;
+  var w=fixWord(seg,PATHWORDS,1);
+  if(w && w!==seg){ fixes.push(seg+" \u2192 "+w); return w }
+  return seg;
+ });
+
+ if(q) q=q.split("&").map(function(kv){
+  var eq=kv.indexOf("="); if(eq<0) return kv;
+  var k=kv.slice(0,eq),v=kv.slice(eq+1);
+  var nk=fixWord(k,QKEYS,1);
+  if(nk && nk!==k){ fixes.push(k+"= \u2192 "+nk+"="); k=nk }
+  if(QVALS[k]){
+   var nv=fixWord(v,QVALS[k],1);
+   if(nv && nv!==v){ fixes.push("="+v+" \u2192 ="+nv); v=nv }
+  }
+  return k+"="+v;
+ }).join("&");
+
+ return {url:scheme+"://"+host+segs.join("/")+(q?"?"+q:"")+hash, fixes:fixes};
+}
+
 /* ===================== alternatives ===================== */
 function twinsFrom(ch,onlyActive){
- var out=[];
+ var out=[],cost={};
  SETS.forEach(function(set){
   if(onlyActive && !S.sets.has(set.id)) return;
-  if(set.chars.indexOf(ch)>-1) set.chars.forEach(function(c){ if(c!==ch&&out.indexOf(c)<0) out.push(c) });
+  function add(c){
+   if(c===ch) return;
+   if(out.indexOf(c)<0) out.push(c);
+   if(cost[c]===undefined||set.cost<cost[c]) cost[c]=set.cost;
+  }
+  if(set.chars.indexOf(ch)>-1) set.chars.forEach(add);
   if(set.pairs) set.pairs.forEach(function(p){
-   if(p[0]===ch&&out.indexOf(p[1])<0) out.push(p[1]);
-   if(p[1]===ch&&out.indexOf(p[0])<0) out.push(p[0]);
+   if(p[0]===ch) add(p[1]);
+   if(p[1]===ch) add(p[0]);
   });
  });
+ out.costOf=cost;
  return out;
 }
-function legal(list){ return S.charset ? list.filter(function(c){return c.split("").every(function(k){return LEGAL.test(k)})}) : list }
+function legal(list){
+ var out=S.charset? list.filter(function(c){return c.split("").every(function(k){return LEGAL.test(k)})}) : list.slice();
+ out.costOf=list.costOf||{};
+ return out;
+}
+/* what a position may become, as plain characters, for the grid UI */
 function optsAt(base,i){
  if(S.off.has(i)) return [];
- var list=Object.prototype.hasOwnProperty.call(S.custom,i)? S.custom[i].slice() : twinsFrom(base[i],true);
- return legal(list);
+ if(Object.prototype.hasOwnProperty.call(S.custom,i)) return legal(S.custom[i].slice());
+ var tw=legal(twinsFrom(base.charAt(i),true)),out=tw.slice(),cost={};
+ Object.keys(tw.costOf||{}).forEach(function(k){ cost[k]=tw.costOf[k] });
+ var seen=S.alts[i];
+ if(seen) Object.keys(seen).forEach(function(c){
+  if(c===base.charAt(i)||!LEGAL.test(c)) return;
+  if(out.indexOf(c)<0) out.push(c);
+  cost[c]=OCR_COST;                 /* a real second opinion beats a guess */
+ });
+ out.costOf=cost;
+ return out;
 }
 function slotsFor(base,useCustom){
  var out=[],i;
  for(i=0;i<base.length;i++){
-  var o=useCustom? optsAt(base,i) : legal(twinsFrom(base[i],true));
-  if(o.length) out.push({i:i,len:1,opts:o});
+  var o=useCustom? optsAt(base,i) : legal(twinsFrom(base.charAt(i),true));
+  if(o.length) out.push({i:i,len:1,opts:o,cost:o.costOf||{}});
  }
  if(S.multi) MULTI.forEach(function(p){
   var at=base.indexOf(p[0]);
-  while(at>-1){ out.push({i:at,len:p[0].length,opts:[p[1]]}); at=base.indexOf(p[0],at+1) }
+  while(at>-1){ var c={}; c[p[1]]=18; out.push({i:at,len:p[0].length,opts:[p[1]],cost:c}); at=base.indexOf(p[0],at+1) }
  });
  out.sort(function(a,b){return a.i-b.i||a.len-b.len});
  return out;
@@ -373,35 +513,36 @@ function applyChanges(base,changes){
  out+=base.slice(prev);
  return {id:out,marks:marks,status:"new"};
 }
-function generateFrom(base,sl,cap,seen,out){
- var n=sl.length;
- function push(changes){
-  var c=applyChanges(base,changes);
-  if(!seen[c.id]){ seen[c.id]=1; out.push(c) }
-  return out.length<cap;
- }
- for(var k=0;k<=n;k++){
-  var idx=[],a; for(a=0;a<k;a++) idx.push(a);
-  while(true){
-   var clash=false,b;
-   for(b=1;b<k;b++){ var s1=sl[idx[b-1]],s2=sl[idx[b]]; if(s1.i+s1.len>s2.i){clash=true;break} }
-   if(!clash){
-    var cnt=new Array(k),z; for(z=0;z<k;z++) cnt[z]=0;
-    while(true){
-     var ch=[],q; for(q=0;q<k;q++) ch.push({slot:sl[idx[q]],alt:sl[idx[q]].opts[cnt[q]]});
-     if(!push(ch)) return out;
-     var p=k-1;
-     while(p>=0){ cnt[p]++; if(cnt[p]<sl[idx[p]].opts.length) break; cnt[p]=0; p-- }
-     if(p<0) break;
-    }
-   }
-   var m=k-1;
-   while(m>=0 && idx[m]===n-k+m) m--;
-   if(m<0) break;
-   idx[m]++;
-   for(var w=m+1;w<k;w++) idx[w]=idx[w-1]+1;
+function okLen(id){ return !S.want.length || S.want.indexOf(id.length)>-1 }
+
+/* Walks the slots depth first but refuses to spend more than the
+   round's budget, so cheap readings all get tested before expensive
+   ones, no matter how many characters they touch. */
+function enumerate(base,slots,budget,cap,seen,out){
+ var n=slots.length,chosen=[];
+ (function rec(si,spent){
+  if(out.length>=cap) return;
+  if(si===n){
+   var c=applyChanges(base,chosen);
+   if(seen[c.id]) return;
+   seen[c.id]=1;
+   if(okLen(c.id)){ c.cost=spent; out.push(c) }
+   return;
   }
- }
+  rec(si+1,spent);
+  var sl=slots[si];
+  if(chosen.length){
+   var last=chosen[chosen.length-1];
+   if(last.slot.i+last.slot.len>sl.i){ return }
+  }
+  for(var j=0;j<sl.opts.length && out.length<cap;j++){
+   var alt=sl.opts[j],c2=sl.cost[alt]||18;
+   if(spent+c2>budget) continue;
+   chosen.push({slot:sl,alt:alt});
+   rec(si+1,spent+c2);
+   chosen.pop();
+  }
+ })(0,0);
  return out;
 }
 function nearestWant(){
@@ -412,27 +553,26 @@ function buildAll(){
  var seen={},out=[],cap=S.cap,target=nearestWant(),L=S.id.length;
  var i,j,k2,b,c2,bases=[];
 
- // A wrong length can never be fixed by swapping, so repair the length first
- // and spend the whole budget on candidates that could actually be right.
  if(target!==null && L===target+1 && S.del){
   log("One character too long, so every single deletion goes first.","y");
   for(i=0;i<L;i++){
    b=S.id.slice(0,i)+S.id.slice(i+1);
-   if(!seen[b]){ seen[b]=1; out.push({id:b,marks:[],status:"new"}); bases.push(b) }
+   if(!seen[b]){ seen[b]=1; out.push({id:b,marks:[],status:"new",cost:5}); bases.push(b) }
   }
  } else if(target!==null && L===target-1 && S.ins){
   log("One character short, so every single insertion goes first.","y");
   for(j=0;j<=L;j++) for(k2=0;k2<ALPHABET.length;k2++){
    c2=S.id.slice(0,j)+ALPHABET.charAt(k2)+S.id.slice(j);
-   if(!seen[c2] && out.length<cap){ seen[c2]=1; out.push({id:c2,marks:[[j,j+1]],status:"new"}); bases.push(c2) }
+   if(!seen[c2] && out.length<cap){ seen[c2]=1; out.push({id:c2,marks:[[j,j+1]],status:"new",cost:5}); bases.push(c2) }
   }
  } else {
   bases.push(S.id);
   if(target!==null && L!==target) log("Length is off by "+Math.abs(L-target)+" and no repair covers that. Swapping alone will not find it.","r");
  }
 
- for(i=0;i<bases.length && out.length<cap;i++)
-  generateFrom(bases[i], slotsFor(bases[i], bases[i]===S.id), cap, seen, out);
+ for(i=0;i<BUDGETS.length && out.length<cap;i++)
+  for(j=0;j<bases.length && out.length<cap;j++)
+   enumerate(bases[j], slotsFor(bases[j], bases[j]===S.id), BUDGETS[i], cap, seen, out);
 
  return out;
 }
@@ -466,18 +606,40 @@ function splitUrl(url){
  }
  return {tpl:"{ID}",id:url,kind:"link",want:[],drive:false};
 }
-function loadUrl(u){
- var r=splitUrl(u);
+function loadUrl(u,keepAlts){
+ var rep=repairScaffold(u);
+ if(rep.fixes.length){
+  log("Repaired the fixed part of the address, which is the bit that has to be exact:","y");
+  rep.fixes.forEach(function(f){ log("   "+f,"y") });
+ }
+ var r=splitUrl(rep.url||u);
  S.tpl=r.tpl; S.id=r.id; S.want=r.want; S.kind=r.kind; S.drive=r.drive;
  S.custom={}; S.off=new Set(); S.sel=null; S.results=[]; S.found=null;
- $("tpl").value=S.tpl; $("idIn").value=S.id; $("pasteUrl").value=u;
+ if(!keepAlts) S.alts={};
+ $("tpl").value=S.tpl; $("idIn").value=S.id; $("pasteUrl").value=urlFor(S.id);
  $("kindNote").textContent=r.kind+", "+r.id.length+" characters";
  drawAll(); drawResults();
 }
 
-/* ===================== checkers ===================== */
-var DEAD=["error 404 (not found)","that\u2019s an error","that's an error","the requested url was not found","page not found","sorry, unable to open the file","no longer exists","404 not found","error 400"];
-var ALIVE=["google drive","request access","you need access","docs.google.com","youtube"];
+/* ===================== checkers =====================
+   The plain folder page is a shell that renders itself in script, so
+   it looks the same whether the id exists or not. embeddedfolderview
+   answers 200 with the folder name, or a flat 404. Far cleaner.      */
+/* Relays cache, and at least one of them treats the id as case
+   insensitive when it does. That handed back a live answer for a dead
+   link. Every probe carries a throwaway parameter so the cache key is
+   fresh, and r.jina.ai is told outright not to serve a stored copy. */
+function bust(){ return "&z="+Math.random().toString(36).slice(2,9) }
+function probeFor(id,fresh){
+ if(S.kind==="Google Drive folder") return "https://drive.google.com/embeddedfolderview?id="+id+(fresh?bust():"");
+ if(S.kind==="Google Drive file")   return "https://drive.google.com/file/d/"+id+"/view";
+ return urlFor(id).replace(/[?&]usp=[^&]*/,"").replace(/\?$/,"");
+}
+var NOCACHE={"x-no-cache":"true"};
+var DEAD=["error 404 (not found)","that\u2019s an error","that's an error","the requested url was not found",
+ "page not found","sorry, unable to open","no longer exists","404 not found","error 400","error 404"];
+var ALIVE=["request access","you need access","need permission","google drive","docs.google.com","youtube"];
+function titleIsDead(t){ return !t || /error\s*4|not found|sign in|page not found/i.test(t) }
 
 var CHECKERS={
  driveapi:{
@@ -502,14 +664,16 @@ var CHECKERS={
   label:"r.jina.ai",
   usable:function(){ return true },
   check:async function(id){
-   var r=await fetch("https://r.jina.ai/"+urlFor(id));
+   var r=await fetch("https://r.jina.ai/"+encodeURIComponent(probeFor(id,true)),{headers:NOCACHE});
+   if(r.status===429||r.status===503) throw new Error("rate limited");
    if(!r.ok) throw new Error("http "+r.status);
-   var raw=await r.text(), t=raw.toLowerCase();
-   if(DEAD.some(function(m){return t.indexOf(m)>-1})) return {live:false};
-   if(ALIVE.some(function(m){return t.indexOf(m)>-1})){
-    var n=raw.match(/Title:\s*(.+)/);
-    return {live:true,name:n? n[1].trim().slice(0,90) : ""};
-   }
+   var raw=await r.text(),t=raw.toLowerCase();
+   if(/returned error\s*4\d\d/.test(t)) return {live:false};
+   var n=raw.match(/^Title:\s*(.+)$/m);
+   var title=n? n[1].trim() : "";
+   if(titleIsDead(title)||DEAD.some(function(m){return t.indexOf(m)>-1})) return {live:false};
+   if(title) return {live:true,name:title.slice(0,90)};
+   if(ALIVE.some(function(m){return t.indexOf(m)>-1})) return {live:true,name:""};
    return {live:null};
   }
  },
@@ -517,16 +681,15 @@ var CHECKERS={
   label:"allorigins",
   usable:function(){ return true },
   check:async function(id){
-   var r=await fetch("https://api.allorigins.win/get?url="+encodeURIComponent(urlFor(id)));
+   var r=await fetch("https://api.allorigins.win/raw?url="+encodeURIComponent(probeFor(id,true)));
    if(!r.ok) throw new Error("http "+r.status);
-   var j=await r.json();
-   var code=j.status&&j.status.http_code, body=j.contents||"", t=body.toLowerCase();
-   if(code===404||code===410) return {live:false};
+   var body=await r.text(),t=body.toLowerCase();
+   if(body.length<60&&/error code|timed out/.test(t)) throw new Error("relay hiccup");
    if(DEAD.some(function(m){return t.indexOf(m)>-1})) return {live:false};
-   if(code===200&&body.length>2000){
-    var n=body.match(/<title>([^<]*)<\/title>/i);
-    return {live:true,name:n? n[1].slice(0,90) : ""};
-   }
+   var n=body.match(/<title>([^<]*)<\/title>/i);
+   var title=n? n[1].trim() : "";
+   if(title&&!titleIsDead(title)) return {live:true,name:title.slice(0,90)};
+   if(title) return {live:false};
    return {live:null};
   }
  },
@@ -534,19 +697,42 @@ var CHECKERS={
   label:"codetabs",
   usable:function(){ return true },
   check:async function(id){
-   var r=await fetch("https://api.codetabs.com/v1/proxy?quest="+encodeURIComponent(urlFor(id)));
+   var r=await fetch("https://api.codetabs.com/v1/proxy?quest="+encodeURIComponent(probeFor(id,true)));
+   if(r.status>=500) throw new Error("http "+r.status);
    if(r.status===404) return {live:false};
    if(!r.ok) throw new Error("http "+r.status);
-   var body=await r.text(), t=body.toLowerCase();
+   var body=await r.text(),t=body.toLowerCase();
+   if(body.length<60&&/error code|timed out/.test(t)) throw new Error("relay hiccup");
    if(DEAD.some(function(m){return t.indexOf(m)>-1})) return {live:false};
-   if(body.length>2000){
-    var n=body.match(/<title>([^<]*)<\/title>/i);
-    return {live:true,name:n? n[1].slice(0,90) : ""};
-   }
+   var n=body.match(/<title>([^<]*)<\/title>/i);
+   var title=n? n[1].trim() : "";
+   if(title&&!titleIsDead(title)) return {live:true,name:title.slice(0,90)};
+   if(title) return {live:false};
    return {live:null};
   }
  }
 };
+/* One live answer is not proof. Ask again, on a fresh probe and a
+   different checker where there is one, before calling it. */
+async function confirm(id){
+ var order=[];
+ if(CHECKERS.driveapi.usable()) order.push("driveapi");
+ ["jina","allorigins","codetabs"].forEach(function(k){ if(S.engines.has(k)) order.push(k) });
+ for(var i=0;i<order.length;i++){
+  try{
+   var r=await CHECKERS[order[i]].check(id);
+   if(r.live===true) return r;
+   if(r.live===false) return null;
+  }catch(e){}
+ }
+ return null;
+}
+/* The free relays meter by the minute. A rate limit is not a broken
+   relay, so it slows the lane down instead of striking the relay out. */
+var PACE={};
+function paceOf(k){ return PACE[k]||(PACE[k]={wait:120}) }
+function easeUp(k){ var p=paceOf(k); p.wait=Math.max(120,Math.round(p.wait*0.85)) }
+function backOff(k){ var p=paceOf(k); p.wait=Math.min(6000,Math.round(p.wait*2.2)+400); return p.wait }
 function activePool(){
  var pool=[];
  if(CHECKERS.driveapi.usable()) pool.push("driveapi");
@@ -568,20 +754,22 @@ async function run(){
  log("Reading a "+S.kind+", "+S.id.length+" characters.");
  if(S.want.length && S.want.indexOf(S.id.length)<0)
   log("That length is unusual. A "+S.kind+" normally has "+S.want.join(" or ")+".","y");
+ var nAlts=Object.keys(S.alts).length;
+ if(nAlts) log(nAlts+" position"+(nAlts===1?"":"s")+" where the passes disagreed. Those spellings get tried first.","d");
 
  var space=comboCount(slotsFor(S.id,true));
  S.results=buildAll();
- log("Built "+S.results.length+" candidate"+(S.results.length===1?"":"s")+", closest reading first.");
+ log("Built "+S.results.length+" candidate"+(S.results.length===1?"":"s")+", likeliest first.");
  if(space!==Infinity && space>S.results.length)
-  log("There are "+space.toLocaleString()+" readings in all. Only the closest "+S.results.length+" get tested, so raise the limit if nothing turns up.","d");
+  log("There are "+space.toLocaleString()+" readings in all. Only the likeliest "+S.results.length+" get tested, so raise the limit if nothing turns up.","d");
  S.filter="all"; drawResults();
 
  var pool=activePool();
  if(!pool.length){ log("No checker is switched on.","r"); finish(); return }
  log("Testing through: "+pool.map(function(p){return CHECKERS[p].label}).join(", "));
 
- var next=0,done=0,dead=0,unclear=0,fails={},total=S.results.length;
- var lanes=Math.max(1,parseInt($("conc").value,10)||4);
+ var next=0,done=0,dead=0,unclear=0,fails={},limited={},total=S.results.length;
+ var lanes=Math.max(1,parseInt($("conc").value,10)||8);
 
  async function worker(lane){
   while(S.running && !S.found){
@@ -592,17 +780,29 @@ async function run(){
    var pick=order[(my+lane)%order.length];
    try{
     var res=await CHECKERS[pick].check(cand.id);
-    fails[pick]=0;
+    fails[pick]=0; easeUp(pick);
     if(res.live===true){
-     cand.status="ok"; cand.name=res.name||"";
-     S.found=cand;
-     log("OPENS  "+cand.id+(res.name? "   "+res.name : ""),"g");
-     S.running=false; return;
-    }
+     var sure=await confirm(cand.id);
+     if(!sure){
+      cand.status="maybe"; unclear++;
+      log("looked alive but would not repeat: "+cand.id,"y");
+     } else {
+      cand.status="ok"; cand.name=sure.name||res.name||"";
+      S.found=cand;
+      log("OPENS  "+cand.id+(cand.name? "   "+cand.name : ""),"g");
+      S.running=false; return;
+     }
+    } else
     if(res.live===false){ cand.status="dead"; dead++ } else { cand.status="maybe"; unclear++ }
    }catch(e){
-    fails[pick]=(fails[pick]||0)+1;
     cand.status="new"; next--;
+    if(/rate limit/i.test(e.message)){
+     var w=backOff(pick);
+     if(!limited[pick]){ limited[pick]=1; log(CHECKERS[pick].label+" is metering us, slowing down. A Drive API key removes this.","y") }
+     await sleep(w);
+     continue;
+    }
+    fails[pick]=(fails[pick]||0)+1;
     if(fails[pick]===1) log(CHECKERS[pick].label+" trouble: "+e.message,"y");
     if(fails[pick]===4) log(CHECKERS[pick].label+" dropped from the pool.","r");
     await sleep(900);
@@ -611,10 +811,10 @@ async function run(){
    done++;
    if(done%4===0||done===total){
     $("bar").style.width=Math.round(done/total*100)+"%";
-    if(done%20===0) log("checked "+done+" of "+total+"    ruled out "+dead+(unclear? "    unclear "+unclear : ""),"d");
+    if(done%25===0) log("checked "+done+" of "+total+"    ruled out "+dead+(unclear? "    unclear "+unclear : ""),"d");
     drawResults();
    }
-   if(pick!=="driveapi") await sleep(250);
+   if(pick!=="driveapi") await sleep(paceOf(pick).wait);
   }
  }
  var jobs=[],L; for(L=0;L<lanes;L++) jobs.push(worker(L));
@@ -643,14 +843,15 @@ function drawVerdict(){
  var untested=S.results.filter(function(r){return r.status==="new"}).length;
  v.innerHTML='<div class="verdict none"><h3>Nothing opened</h3><div class="name">'+
   (maybes? maybes+' came back unclear, listed under <b>Unclear</b> below and worth opening yourself. ' : '')+
-  (untested? untested+' were never reached. ' : '')+
+  (untested? untested+' were never reached, so raise the limit. ' : '')+
   'If the length was short by one, a character was lost at the line break and no amount of swapping will find it. Check the picture at the wrap point.</div>'+
   '<div class="row"><button class="btn ghost" id="widen">Widen the sets and run again</button></div></div>';
  $("widen").onclick=function(){
-  var order=["tight","normal","wide","all"], at=order.indexOf(S.preset);
+  var order=["tight","normal","wide","all"],at=order.indexOf(S.preset);
   S.preset=order[Math.min(order.length-1,at+1)];
   S.sets=new Set(PRESETS[S.preset].sets); S.custom={}; S.off=new Set();
-  log("Widened to: "+PRESETS[S.preset].name,"y");
+  S.cap=Math.min(25000,S.cap*3);
+  log("Widened to: "+PRESETS[S.preset].name+", limit now "+S.cap,"y");
   drawAll(); run();
  };
 }
@@ -690,10 +891,10 @@ function drawGrid(){
  var g=$("grid"); g.innerHTML="";
  if(!S.id){ g.innerHTML='<span style="padding:10px 2px;color:var(--mute);font-size:14px">Nothing loaded yet.</span>'; return }
  for(var i=0;i<S.id.length;i++)(function(i){
-  var o=optsAt(S.id,i), b=document.createElement("button");
-  b.className="cell"+(o.length?" on":"")+(S.off.has(i)?" off":"")+(S.sel===i?" sel":"");
+  var o=optsAt(S.id,i),b=document.createElement("button");
+  b.className="cell"+(o.length?" on":"")+(S.alts[i]?" dis":"")+(S.off.has(i)?" off":"")+(S.sel===i?" sel":"");
   b.setAttribute("data-n",o.length? String(o.length+1) : "");
-  b.setAttribute("aria-label","Character "+(i+1)+", "+S.id.charAt(i));
+  b.setAttribute("aria-label","Character "+(i+1)+", "+S.id.charAt(i)+(S.alts[i]? ", passes disagreed":""));
   b.innerHTML=esc(S.id.charAt(i))+((i+1)%5===0? '<span class="tick">'+(i+1)+'</span>' : '');
   b.onclick=function(){ S.sel=(S.sel===i? null : i); drawGrid(); drawEditor() };
   g.appendChild(b);
@@ -703,8 +904,11 @@ function drawEditor(){
  var e=$("editor");
  if(S.sel===null||!S.id){ e.hidden=true; return }
  e.hidden=false;
- var i=S.sel, ch=S.id.charAt(i), cur=optsAt(S.id,i), all=legal(twinsFrom(ch,false));
- var h='<div class="who">Character '+(i+1)+' of '+S.id.length+' &nbsp; <b>'+esc(ch)+'</b></div><div class="chips">';
+ var i=S.sel,ch=S.id.charAt(i),cur=optsAt(S.id,i),all=legal(twinsFrom(ch,false)).slice();
+ if(S.alts[i]) Object.keys(S.alts[i]).forEach(function(c){ if(c!==ch&&all.indexOf(c)<0&&LEGAL.test(c)) all.push(c) });
+ var h='<div class="who">Character '+(i+1)+' of '+S.id.length+' &nbsp; <b>'+esc(ch)+'</b>'+
+  (S.alts[i]? ' &nbsp;<span style="color:var(--warn)">passes also read '+esc(Object.keys(S.alts[i]).join(" "))+'</span>' : '')+
+  '</div><div class="chips">';
  if(!all.length) h+='<span style="color:var(--mute);font-size:13px">No twin on file. Add one below.</span>';
  all.forEach(function(c){ h+='<button class="chip'+(cur.indexOf(c)>-1?" picked":"")+'" data-c="'+esc(c)+'">'+esc(c)+'</button>' });
  h+='</div><div class="row"><button class="btn ghost small" data-act="none">None here</button>'
@@ -715,7 +919,7 @@ function drawEditor(){
  e.innerHTML=h;
  e.querySelectorAll(".chip").forEach(function(b){
   b.onclick=function(){
-   var c=b.getAttribute("data-c"), list=optsAt(S.id,i).slice(), at=list.indexOf(c);
+   var c=b.getAttribute("data-c"),list=optsAt(S.id,i).slice(),at=list.indexOf(c);
    if(at>-1) list.splice(at,1); else list.push(c);
    S.custom[i]=list; S.off.delete(i); if(!list.length) S.off.add(i);
    drawAll();
@@ -733,7 +937,7 @@ function drawEditor(){
  });
 }
 function drawStats(){
- var sl=S.id? slotsFor(S.id,true) : [], n=comboCount(sl);
+ var sl=S.id? slotsFor(S.id,true) : [],n=comboCount(sl);
  $("statChars").textContent=sl.length;
  $("statCombos").textContent=n===Infinity? "huge" : n.toLocaleString();
  $("comboBox").className=(n>S.cap? "bad" : "");
@@ -741,7 +945,7 @@ function drawStats(){
  $("statLeft").textContent=S.results.filter(function(r){return r.status==="new"}).length;
 }
 function drawHint(){
- var h=$("lenHint"), L=S.id.length;
+ var h=$("lenHint"),L=S.id.length;
  if(!L){ h.textContent=""; h.className="hint"; return }
  if(S.want.length && S.want.indexOf(L)<0){
   h.className="hint bad";
@@ -773,7 +977,7 @@ function drawResults(){
  if(!rows.length){ box.innerHTML='<div class="empty">Nothing in this view.</div>'; return }
  var ol=document.createElement("ol"); ol.className="results";
  rows.slice(0,600).forEach(function(r){
-  var i=S.results.indexOf(r), li=document.createElement("li");
+  var i=S.results.indexOf(r),li=document.createElement("li");
   li.className=r.status==="dead"? "dead" : (r.status==="ok"? "ok" : (r.status==="maybe"? "maybe" : ""));
   li.innerHTML='<span class="num">'+(i+1)+'</span><span class="val">'+marked(r)+'</span>'+
    '<span class="acts"><a href="'+esc(urlFor(r.id))+'" target="_blank" rel="noopener">Open</a>'+
@@ -797,7 +1001,7 @@ function copy(t){
 }
 
 /* ===================== image and reading ===================== */
-var zoomV=2.8,panX=0,panY=0,dragging=false,lx=0,ly=0,imgFile=null;
+var zoomV=2.8,panX=0,panY=0,dragging=false,lx=0,ly=0,imgFile=null,imgEl=null;
 function showImage(file){
  if(!file||!/^image\//.test(file.type)) return;
  imgFile=file;
@@ -810,22 +1014,87 @@ function applyZoom(){
  $("shot").style.transform="translate("+panX+"px,"+panY+"px) scale("+zoomV+")";
  $("zoomVal").textContent=zoomV.toFixed(1)+"\u00D7";
 }
-function prep(file,forceInvert){
- return new Promise(function(res){
+function loadBitmap(file){
+ return new Promise(function(res,rej){
   var img=new Image();
-  img.onload=function(){
-   var k=Math.min(4,Math.max(2,1000/img.width));
-   var c=document.createElement("canvas"); c.width=img.width*k; c.height=img.height*k;
-   var x=c.getContext("2d"); x.drawImage(img,0,0,c.width,c.height);
-   var d=x.getImageData(0,0,c.width,c.height),p=d.data,sum=0,i;
-   for(i=0;i<p.length;i+=4){ var g=0.299*p[i]+0.587*p[i+1]+0.114*p[i+2]; p[i]=p[i+1]=p[i+2]=g; sum+=g }
-   var mean=sum/(p.length/4);
-   var flip = (forceInvert===undefined)? (mean<128) : forceInvert;
-   for(i=0;i<p.length;i+=4){ var v=p[i]; if(flip) v=255-v; v=(v<145)?0:255; p[i]=p[i+1]=p[i+2]=v }
-   x.putImageData(d,0,0); res(c);
-  };
+  img.onload=function(){ res(img) };
+  img.onerror=function(){ rej(new Error("bad image")) };
   img.src=URL.createObjectURL(file);
  });
+}
+/* One screenshot, several ways of looking at it. Scale, threshold and
+   the underline all change which characters come out, and comparing
+   the readings is what exposes the shaky positions. */
+function prep(img,o){
+ var c=document.createElement("canvas");
+ c.width=Math.round(img.width*o.scale); c.height=Math.round(img.height*o.scale);
+ var x=c.getContext("2d");
+ x.imageSmoothingEnabled=true; x.imageSmoothingQuality="high";
+ x.drawImage(img,0,0,c.width,c.height);
+ var d=x.getImageData(0,0,c.width,c.height),p=d.data,sum=0,i;
+ for(i=0;i<p.length;i+=4){ var g=0.299*p[i]+0.587*p[i+1]+0.114*p[i+2]; p[i]=p[i+1]=p[i+2]=g; sum+=g }
+ var mean=sum/(p.length/4),flip=mean<128;
+ for(i=0;i<p.length;i+=4){ var v=flip? 255-p[i] : p[i]; p[i]=p[i+1]=p[i+2]=v }
+ if(o.mode!=="none"){
+  var th=o.mode==="fixed"? 145 : otsu(p);
+  for(i=0;i<p.length;i+=4){ var b=p[i]<th? 0:255; p[i]=p[i+1]=p[i+2]=b }
+ }
+ if(o.underline && o.mode!=="none") stripRules(p,c.width,c.height);
+ x.putImageData(d,0,0);
+ return c;
+}
+function otsu(p){
+ var h=new Array(256),i,n=0;
+ for(i=0;i<256;i++) h[i]=0;
+ for(i=0;i<p.length;i+=4){ h[p[i]|0]++; n++ }
+ var sum=0; for(i=0;i<256;i++) sum+=i*h[i];
+ var sB=0,wB=0,best=0,th=128;
+ for(i=0;i<256;i++){
+  wB+=h[i]; if(!wB) continue;
+  var wF=n-wB; if(!wF) break;
+  sB+=i*h[i];
+  var mB=sB/wB,mF=(sum-sB)/wF,v=wB*wF*(mB-mF)*(mB-mF);
+  if(v>best){ best=v; th=i }
+ }
+ return th;
+}
+/* An underline glues itself to the baseline and turns l into I.
+   Any horizontal ink run wider than a tenth of the image is not a
+   letter, so it goes. */
+function stripRules(p,w,h){
+ var minRun=Math.max(24,Math.round(w*0.10)),y,x,run,i;
+ for(y=0;y<h;y++){
+  run=0;
+  for(x=0;x<=w;x++){
+   var dark=x<w && p[(y*w+x)*4]<128;
+   if(dark) run++;
+   else{
+    if(run>=minRun) for(i=x-run;i<x;i++){ var k=(y*w+i)*4; p[k]=p[k+1]=p[k+2]=255 }
+    run=0;
+   }
+  }
+ }
+}
+/* Screenshots wrap the address over several lines. Join them back up,
+   and drop whatever sat in front of it. */
+function linkFromText(txt){
+ var lines=String(txt).split(/\r?\n/).map(function(l){return l.replace(/\s+/g,"")}).filter(function(l){return l.length>1});
+ var start=-1,i;
+ for(i=0;i<lines.length;i++){
+  if(/https?:\/\//i.test(lines[i])){ start=i; break }
+  if(start<0 && HOSTS.some(function(h){ return fold(lines[i]).indexOf(fold(h))>-1 })){ start=i }
+ }
+ if(start<0) return "";
+ var url=lines[start].replace(/^.*?(?=https?:\/\/)/i,"");
+ for(i=start+1;i<lines.length;i++){
+  if(!/^[A-Za-z0-9_\-\/?=&.#%~+:]+$/.test(lines[i])) break;
+  url+=lines[i];
+ }
+ return url;
+}
+function idPart(url){
+ var r=splitUrl(url);
+ return r.id||"";
 }
 async function runOcr(auto){
  if(!imgFile){ toast("Drop a screenshot first"); return }
@@ -839,30 +1108,79 @@ async function runOcr(auto){
    s.onload=ok; s.onerror=function(){ no(new Error("could not load")) };
    document.head.appendChild(s);
   });
-  log("Reading the picture.");
+  var img=await loadBitmap(imgFile);
+  var base=Math.max(3,Math.min(8,1600/Math.max(1,img.width)));
+  var plans=[
+   {scale:base,     mode:"otsu", underline:true,  psm:"6"},
+   {scale:base*1.5, mode:"otsu", underline:true,  psm:"6"},
+   {scale:base,     mode:"fixed",underline:true,  psm:"6"},
+   {scale:base*1.5, mode:"fixed",underline:false, psm:"6"},
+   {scale:base*2,   mode:"otsu", underline:false, psm:"6"},
+   {scale:base,     mode:"none", underline:false, psm:"6"},
+   {scale:base*1.5, mode:"otsu", underline:true,  psm:"11"},
+   {scale:base,     mode:"fixed",underline:true,  psm:"11"}
+  ];
   var w=await window.Tesseract.createWorker("eng");
-  await w.setParameters({tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_:/.?=&#~"});
-  var best="",pass;
-  for(pass=0;pass<2;pass++){
-   var canvas=await prep(imgFile,pass===0? undefined : false);
-   var out=await w.recognize(canvas);
-   var txt=(out.data.text||"").replace(/\s+/g,"");
-   var link=txt.match(/https?:\/\/\S+/);
-   var got=link? link[0] : txt;
-   if(got.length>best.length) best=got;
-   if(link&&pass===0) break;
+  var reads=[],p;
+  log("Reading the picture "+plans.length+" different ways.");
+  for(p=0;p<plans.length;p++){
+   try{
+    await w.setParameters({
+     tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_:/.?=&#~",
+     tessedit_pageseg_mode:plans[p].psm
+    });
+    var canvas=prep(img,plans[p]);
+    var out=await w.recognize(canvas);
+    var got=linkFromText(out.data.text||"");
+    if(got){
+     var rep=repairScaffold(got);
+     if(rep.url) reads.push(rep.url);
+    }
+   }catch(e){ /* one bad pass is not fatal */ }
+   $("bar").hidden=false; $("barWrap").hidden=false;
+   $("bar").style.width=Math.round((p+1)/plans.length*100)+"%";
   }
   await w.terminate();
-  if(best&&/https?:\/\//.test(best)){
-   log("Read it as: "+best,"g");
-   loadUrl(best);
-   if(auto) run();
-  }else if(best){
-   $("pasteUrl").value=best;
-   log("No full address found. The raw reading is in the box, fix it and press the button.","y");
-  }else{
+
+  if(!reads.length){
    log("Nothing readable came back. Crop tighter around the link, or type it yourself.","r");
+   $("ocrBtn").disabled=false; return;
   }
+
+  /* vote */
+  var votes={},k;
+  reads.forEach(function(u){ votes[u]=(votes[u]||0)+1 });
+  var uniq=Object.keys(votes).sort(function(a,b){ return votes[b]-votes[a] });
+
+  /* the shape tells us how long the id should be, so readings of the
+     wrong length are dropped before they can outvote a good one */
+  var probe=splitUrl(uniq[0]),want=probe.want;
+  var keep=uniq.filter(function(u){ var s=splitUrl(u); return !want.length||want.indexOf(s.id.length)>-1 });
+  if(!keep.length) keep=uniq;
+  var best=keep[0];
+
+  log("Read it "+plans.length+" ways, "+uniq.length+" different answers"+
+      (keep.length<uniq.length? ", "+keep.length+" of the right length" : "")+".","d");
+  log("Going with: "+best,"g");
+
+  loadUrl(best);
+
+  /* per position, everything the other passes saw there */
+  var bid=idPart(best),alts={};
+  keep.forEach(function(u){
+   var v=idPart(u);
+   if(v.length!==bid.length||v===bid) return;
+   for(var i=0;i<bid.length;i++) if(v.charAt(i)!==bid.charAt(i)){
+    if(!alts[i]) alts[i]={};
+    alts[i][v.charAt(i)]=(alts[i][v.charAt(i)]||0)+1;
+   }
+  });
+  S.alts=alts;
+  var nd=Object.keys(alts).length;
+  if(nd) log("The passes disagreed at "+nd+" position"+(nd===1?"":"s")+": "+
+   Object.keys(alts).map(function(i){ return (Number(i)+1)+bid.charAt(i)+"/"+Object.keys(alts[i]).join("") }).join("  "),"y");
+  drawAll();
+  if(auto) run();
  }catch(e){
   log("The text reader would not load, so type the link into the box instead.","r");
  }
@@ -901,6 +1219,9 @@ var vp=$("viewport");
 vp.addEventListener("pointerdown",function(e){ dragging=true; lx=e.clientX; ly=e.clientY; vp.classList.add("drag"); vp.setPointerCapture(e.pointerId) });
 vp.addEventListener("pointermove",function(e){ if(!dragging) return; panX+=e.clientX-lx; panY+=e.clientY-ly; lx=e.clientX; ly=e.clientY; applyZoom() });
 ["pointerup","pointercancel"].forEach(function(e){ vp.addEventListener(e,function(){ dragging=false; vp.classList.remove("drag") }) });
+
+/* exposed so the head of the file can be tested outside a browser */
+if(typeof module!=="undefined"&&module.exports) module.exports={repairScaffold:repairScaffold,fold:fold,lev:lev,splitUrl:splitUrl,linkFromText:linkFromText};
 
 drawEngines(); drawAll(); drawResults();
 })();
